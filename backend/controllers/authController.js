@@ -4,7 +4,7 @@
 ----------------------------
 */
 // Gestioneaza intrarea in cont pentru profesor/admin si student, cu reguli diferite pentru fiecare rol.
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");

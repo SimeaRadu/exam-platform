@@ -497,7 +497,7 @@ async function seedAdminProfessor(pool) {
     return;
   }
 
-  const bcrypt = require("bcrypt");
+  const bcrypt = require("bcryptjs");
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const fullName = ADMIN_FULL_NAME || "Profesor Admin";
   const existing = await pool

@@ -4,7 +4,7 @@
 ----------------------------
 */
 // Contine logica pentru creare, import Excel, listare si stergere completa a utilizatorilor.
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const xlsx = require("xlsx");
 const { getPool, sql } = require("../db");
 const { isAdminUser } = require("../middleware/authMiddleware");
