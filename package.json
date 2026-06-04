@@ -4,6 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "postinstall": "cd backend && npm install --omit=dev",
     "start": "node backend/server.js"
   },
   "engines": {
