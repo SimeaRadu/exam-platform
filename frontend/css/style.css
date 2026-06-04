@@ -339,6 +339,10 @@ select:focus {
   color: #ffd83d;
 }
 
+.warning-heading {
+  color: #ffd83d;
+}
+
 .status-active {
   color: #7de2ae;
 }
@@ -349,6 +353,12 @@ select:focus {
 
 .status-archived {
   color: #c99cff;
+}
+
+.status-plagiarism {
+  border-color: rgba(255, 95, 87, 0.58);
+  background: rgba(255, 95, 87, 0.14);
+  color: #ff5f57;
 }
 
 .action-row {
@@ -466,6 +476,56 @@ button:disabled {
 
 .danger-button:hover {
   background: rgba(255, 139, 131, 0.12);
+}
+
+.problem-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 216, 61, 0.7);
+  border-radius: 999px;
+  background: rgba(255, 216, 61, 0.12);
+  color: #ffd83d;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.test-lock-notifications {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 10000;
+  display: grid;
+  gap: 12px;
+  width: min(420px, calc(100vw - 32px));
+}
+
+.test-lock-card {
+  border: 1px solid rgba(255, 216, 61, 0.68);
+  border-radius: 8px;
+  background: rgba(15, 32, 46, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
+  padding: 16px;
+}
+
+.test-lock-card h3 {
+  margin: 0 0 6px;
+  color: #ffd83d;
+}
+
+.test-lock-card p {
+  margin: 3px 0;
+  color: var(--muted-text);
+}
+
+.test-lock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .message {
@@ -751,6 +811,33 @@ button.exam-card:hover {
   gap: 10px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.exam-start-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: min(100%, 260px);
+}
+
+.compact-field {
+  display: grid;
+  gap: 4px;
+  min-width: 128px;
+  transform: translateY(3px);
+}
+
+.compact-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compact-field select {
+  min-height: 42px;
+  padding: 8px 10px;
 }
 
 .panel-divider {

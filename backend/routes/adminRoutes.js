@@ -15,7 +15,6 @@ const {
 } = require("../controllers/adminController");
 const {
   authenticateToken,
-  requireAdmin,
   requireRole,
 } = require("../middleware/authMiddleware");
 
@@ -35,11 +34,11 @@ router.use(requireRole("professor"));
       Endpoint-uri admin
 ----------------------------
 */
-// Profesorii pot vedea studentii, iar creare/stergere/import sunt permise doar adminului principal.
+// Profesorii si adminul pot administra studentii; adminul ramane singurul care poate gestiona profesori.
 router.get("/users", listUsers);
-router.post("/users", requireAdmin, createUser);
-router.post("/users/import-excel", requireAdmin, upload.single("studentsFile"), importUsersFromExcel);
-router.delete("/users/groups/:groupName", requireAdmin, deleteStudentGroup);
-router.delete("/users/:id", requireAdmin, deleteUser);
+router.post("/users", createUser);
+router.post("/users/import-excel", upload.single("studentsFile"), importUsersFromExcel);
+router.delete("/users/groups/:groupName", deleteStudentGroup);
+router.delete("/users/:id", deleteUser);
 
 module.exports = router;

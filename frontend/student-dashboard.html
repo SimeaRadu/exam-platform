@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Student | Exam Platform</title>
-  <link rel="stylesheet" href="css/style.css?v=20260601-2">
+  <link rel="stylesheet" href="css/style.css?v=20260605-2">
 </head>
 <body>
   <!--
@@ -252,7 +252,7 @@
 
         <section class="panel">
           <div class="section-heading">
-            <h2>Examene incepute</h2>
+            <h2 class="warning-heading">Examene incepute</h2>
             <p>Examene active disponibile pentru rezolvare.</p>
           </div>
           <div id="activeExamsList" class="exam-card-list"></div>
@@ -303,17 +303,16 @@
     </section>
   </main>
 
-  <!-- Overlay folosit cand studentul iese din fullscreen in timpul testului. -->
+  <!-- Overlay folosit cand testul este blocat pana la aprobarea profesorului/adminului. -->
   <div id="fullscreenLockOverlay" class="fullscreen-lock hidden" role="alertdialog" aria-modal="true">
     <div class="fullscreen-lock-panel">
-      <h2>Revino in fullscreen</h2>
-      <p>Testul este blocat pana revii in modul fullscreen.</p>
-      <button id="returnFullscreenButton" class="primary-button" type="button">Revino in fullscreen</button>
+      <h2 id="fullscreenLockTitle">Test blocat</h2>
+      <p id="fullscreenLockMessage">A fost detectat un eveniment in timpul testului. Asteapta aprobarea profesorului ca sa continui.</p>
     </div>
   </div>
 
   <!-- Scripturile pentru API si dashboard student. -->
   <script src="js/api.js?v=20260601-1"></script>
-  <script src="js/student-dashboard.js?v=20260601-2"></script>
+  <script src="js/student-dashboard.js?v=20260605-6"></script>
 </body>
 </html>

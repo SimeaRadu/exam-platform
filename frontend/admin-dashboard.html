@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Profesor | Exam Platform</title>
-  <link rel="stylesheet" href="css/style.css?v=20260512-3">
+  <link rel="stylesheet" href="css/style.css?v=20260605-2">
 </head>
 <body>
   <!--
@@ -197,8 +197,8 @@
               <th>Rol</th>
               <th>Email</th>
               <th>Grupa</th>
-              <th data-admin-only-column>Cod unic</th>
-              <th data-admin-only-column>Actiuni</th>
+              <th data-account-manager-column>Cod unic</th>
+              <th data-account-manager-column>Actiuni</th>
             </tr>
           </thead>
           <tbody id="usersTableBody">
@@ -726,7 +726,10 @@ CORECT: 1</pre>
             <h2 id="examResultsTitle">Rezultate studenti</h2>
             <p id="examResultsMeta">Notele salvate dupa trimiterea testelor.</p>
           </div>
-          <button id="backToResultExamsButton" class="secondary-button" type="button">Inapoi la examene</button>
+          <div class="action-row">
+            <button id="downloadResultsExcelButton" class="secondary-button" type="button">Descarca Excel</button>
+            <button id="backToResultExamsButton" class="secondary-button" type="button">Inapoi la examene</button>
+          </div>
         </div>
 
         <div class="table-wrap">
@@ -764,8 +767,11 @@ CORECT: 1</pre>
     </section>
   </main>
 
+  <!-- Notificari live pentru studenti blocati in timpul testului. -->
+  <div id="testLockNotifications" class="test-lock-notifications hidden" aria-live="assertive"></div>
+
   <!-- Scripturile pentru API si dashboard profesor/admin. -->
   <script src="js/api.js?v=20260512-3"></script>
-  <script src="js/admin-dashboard.js?v=20260512-3"></script>
+  <script src="js/admin-dashboard.js?v=20260605-1"></script>
 </body>
 </html>

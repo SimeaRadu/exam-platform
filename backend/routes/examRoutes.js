@@ -16,12 +16,15 @@ const {
   deleteExam,
   getResultDetails,
   importRtf,
+  listActiveTestLocks,
   listExamAssignments,
   listExams,
   listResults,
   listSubjects,
   listVariants,
+  markTestLockPlagiarism,
   randomizeExamAssignments,
+  releaseTestLock,
   saveExamAssignment,
   updateSubjectAssignment,
   updateSubjectInfo,
@@ -106,6 +109,9 @@ router.delete("/exams/:id", deleteExam);
 // Profesorul vede rezultatele studentilor si detaliile testului rezolvat.
 router.get("/results", listResults);
 router.get("/results/:id", getResultDetails);
+router.get("/test-locks", listActiveTestLocks);
+router.post("/test-locks/:lockId/release", releaseTestLock);
+router.post("/test-locks/:lockId/plagiarism", markTestLockPlagiarism);
 
 /*
 ----------------------------

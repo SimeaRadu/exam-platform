@@ -772,6 +772,10 @@ async function deleteExamData(transaction, examId) {
 
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
+    .query("DELETE FROM student_test_locks WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
     .query("DELETE FROM student_test_events WHERE exam_id = @examId");
 
   await new sql.Request(transaction)
@@ -816,21 +820,6 @@ async function deleteExamData(transaction, examId) {
 
 /*
 ----------------------------
-     Activare automata examen
-----------------------------
-*/
-// Porneste automat examenele viitoare cand data si ora programata au fost atinse.
-async function activateDueExams(pool) {
-  await pool.request().query(`
-    UPDATE exams
-    SET status = 'active'
-    WHERE status = 'future'
-      AND exam_date <= GETDATE()
-  `);
-}
-
-/*
-----------------------------
         Listare examene
 ----------------------------
 */
@@ -838,7 +827,6 @@ async function activateDueExams(pool) {
 async function listExams(req, res) {
   try {
     const pool = await getPool();
-    await activateDueExams(pool);
     const admin = isAdminUser(req.user);
     const result = await pool
       .request()
@@ -1075,7 +1063,8 @@ async function canManageExam(pool, req, examId) {
       SELECT TOP 1 e.id
       FROM exams e
       INNER JOIN subjects s ON s.id = e.subject_id
-      WHERE e.id = @examId AND s.professor_id = @professorId
+      WHERE e.id = @examId
+        AND (s.professor_id = @professorId OR e.created_by = @professorId)
     `);
 
   return result.recordset.length > 0;
@@ -1477,7 +1466,8 @@ async function listResults(req, res) {
                r.exam_id, e.title AS exam_title, e.created_by,
                e.exam_date, s.name AS subject_name, s.professor_id,
                v.variant_name, v.row_number,
-               r.score, r.max_score, r.grade, r.submitted_at
+               r.score, r.max_score, r.grade, r.submitted_at,
+               ISNULL(events.event_count, 0) AS event_count
         FROM results r
         INNER JOIN users u ON u.id = r.student_id
         INNER JOIN exams e ON e.id = r.exam_id
@@ -1485,6 +1475,12 @@ async function listResults(req, res) {
         LEFT JOIN student_exam_assignments sea
           ON sea.student_id = r.student_id AND sea.exam_id = r.exam_id
         LEFT JOIN exam_variants v ON v.id = sea.variant_id
+        OUTER APPLY (
+          SELECT COUNT(*) AS event_count
+          FROM student_test_events ste
+          WHERE ste.student_id = r.student_id
+            AND ste.exam_id = r.exam_id
+        ) events
         WHERE @isAdmin = 1 OR s.professor_id = @professorId
         ORDER BY r.submitted_at DESC
       `);
@@ -1613,6 +1609,219 @@ async function getResultDetails(req, res) {
   } catch (error) {
     res.status(500).json({
       message: "Eroare la citirea detaliilor rezultatului.",
+      error: error.message,
+    });
+  }
+}
+
+/*
+----------------------------
+      Blocari test live
+----------------------------
+*/
+// Profesorii vad studentii blocati la examenele lor si pot permite continuarea sau inchiderea testului.
+async function listActiveTestLocks(req, res) {
+  try {
+    const pool = await getPool();
+    const admin = isAdminUser(req.user);
+    const result = await pool
+      .request()
+      .input("professorId", sql.Int, req.user.id)
+      .input("isAdmin", sql.Bit, admin ? 1 : 0)
+      .query(`
+        SELECT l.id, l.student_id, u.full_name AS student_name,
+               u.email AS student_email, u.matriculation_number,
+               l.exam_id, e.title AS exam_title, e.exam_date,
+               s.name AS subject_name, s.professor_id,
+               l.event_type, l.details, l.created_at
+        FROM student_test_locks l
+        INNER JOIN users u ON u.id = l.student_id
+        INNER JOIN exams e ON e.id = l.exam_id
+        INNER JOIN subjects s ON s.id = e.subject_id
+        WHERE l.is_active = 1
+          AND (@isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId)
+        ORDER BY l.created_at DESC
+      `);
+
+    res.json({
+      locks: result.recordset,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la citirea blocarilor active.",
+      error: error.message,
+    });
+  }
+}
+
+async function releaseTestLock(req, res) {
+  try {
+    const lockId = Number(req.params.lockId);
+
+    if (!Number.isInteger(lockId)) {
+      return res.status(400).json({
+        message: "ID blocare invalid.",
+      });
+    }
+
+    const pool = await getPool();
+    const lockResult = await pool
+      .request()
+      .input("lockId", sql.Int, lockId)
+      .query(`
+        SELECT TOP 1 id, exam_id
+        FROM student_test_locks
+        WHERE id = @lockId AND is_active = 1
+      `);
+
+    if (lockResult.recordset.length === 0) {
+      return res.status(404).json({
+        message: "Blocarea nu mai este activa.",
+      });
+    }
+
+    const examId = Number(lockResult.recordset[0].exam_id);
+
+    if (!(await canManageExam(pool, req, examId))) {
+      return res.status(403).json({
+        message: "Nu ai dreptul sa deblochezi acest test.",
+      });
+    }
+
+    await pool
+      .request()
+      .input("lockId", sql.Int, lockId)
+      .input("releasedBy", sql.Int, req.user.id)
+      .query(`
+        UPDATE student_test_locks
+        SET is_active = 0,
+            released_at = SYSUTCDATETIME(),
+            released_by = @releasedBy
+        WHERE id = @lockId
+      `);
+
+    res.json({
+      message: "Studentul poate continua testul.",
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la deblocarea testului.",
+      error: error.message,
+    });
+  }
+}
+
+async function markTestLockPlagiarism(req, res) {
+  try {
+    const lockId = Number(req.params.lockId);
+
+    if (!Number.isInteger(lockId)) {
+      return res.status(400).json({
+        message: "ID blocare invalid.",
+      });
+    }
+
+    const pool = await getPool();
+    const lockResult = await pool
+      .request()
+      .input("lockId", sql.Int, lockId)
+      .query(`
+        SELECT TOP 1 id, student_id, exam_id, event_type, details
+        FROM student_test_locks
+        WHERE id = @lockId AND is_active = 1
+      `);
+
+    if (lockResult.recordset.length === 0) {
+      return res.status(404).json({
+        message: "Blocarea nu mai este activa.",
+      });
+    }
+
+    const lock = lockResult.recordset[0];
+    const examId = Number(lock.exam_id);
+    const studentId = Number(lock.student_id);
+
+    if (!(await canManageExam(pool, req, examId))) {
+      return res.status(403).json({
+        message: "Nu ai dreptul sa inchizi acest test.",
+      });
+    }
+
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      await new sql.Request(transaction)
+        .input("studentId", sql.Int, studentId)
+        .input("examId", sql.Int, examId)
+        .query(`
+          DELETE FROM student_answer_drafts
+          WHERE student_id = @studentId AND exam_id = @examId
+        `);
+
+      await new sql.Request(transaction)
+        .input("studentId", sql.Int, studentId)
+        .input("examId", sql.Int, examId)
+        .query(`
+          DELETE FROM student_answers
+          WHERE student_id = @studentId AND exam_id = @examId
+        `);
+
+      await new sql.Request(transaction)
+        .input("studentId", sql.Int, studentId)
+        .input("examId", sql.Int, examId)
+        .query(`
+          IF EXISTS (
+            SELECT 1 FROM results
+            WHERE student_id = @studentId AND exam_id = @examId
+          )
+          BEGIN
+            UPDATE results
+            SET score = 0,
+                max_score = 0,
+                grade = NULL,
+                submitted_at = SYSUTCDATETIME()
+            WHERE student_id = @studentId AND exam_id = @examId
+          END
+          ELSE
+          BEGIN
+            INSERT INTO results (student_id, exam_id, score, max_score, grade)
+            VALUES (@studentId, @examId, 0, 0, NULL)
+          END
+        `);
+
+      await new sql.Request(transaction)
+        .input("studentId", sql.Int, studentId)
+        .input("examId", sql.Int, examId)
+        .input("details", sql.NVarChar(500), "Profesorul a incheiat testul si l-a marcat ca plagiat.")
+        .query(`
+          INSERT INTO student_test_events (student_id, exam_id, event_type, details)
+          VALUES (@studentId, @examId, 'plagiarism_closed', @details)
+        `);
+
+      await new sql.Request(transaction)
+        .input("lockId", sql.Int, lockId)
+        .input("releasedBy", sql.Int, req.user.id)
+        .query(`
+          UPDATE student_test_locks
+          SET is_active = 0,
+              released_at = SYSUTCDATETIME(),
+              released_by = @releasedBy
+          WHERE id = @lockId
+        `);
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+
+    res.status(201).json({
+      message: "Test incheiat ca plagiat.",
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la inchiderea testului.",
       error: error.message,
     });
   }
@@ -2068,11 +2277,14 @@ module.exports = {
   importRtf,
   getResultDetails,
   listExamAssignments,
+  listActiveTestLocks,
   listExams,
   listResults,
   listSubjects,
   listVariants,
+  markTestLockPlagiarism,
   randomizeExamAssignments,
+  releaseTestLock,
   saveExamAssignment,
   updateSubjectAssignment,
   updateSubjectInfo,

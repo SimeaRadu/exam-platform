@@ -75,12 +75,14 @@ const examResultsPanel = document.getElementById("examResultsPanel");
 const examResultsTitle = document.getElementById("examResultsTitle");
 const examResultsMeta = document.getElementById("examResultsMeta");
 const backToResultExamsButton = document.getElementById("backToResultExamsButton");
+const downloadResultsExcelButton = document.getElementById("downloadResultsExcelButton");
 const resultsTableBody = document.getElementById("resultsTableBody");
 const resultDetailsPanel = document.getElementById("resultDetailsPanel");
 const resultDetailsTitle = document.getElementById("resultDetailsTitle");
 const resultDetailsMeta = document.getElementById("resultDetailsMeta");
 const resultDetailsContent = document.getElementById("resultDetailsContent");
 const closeResultDetailsButton = document.getElementById("closeResultDetailsButton");
+const testLockNotifications = document.getElementById("testLockNotifications");
 let canManageUsers = user && user.unique_code === "PROF-ADMIN";
 let allExams = [];
 let examFilter = "all";
@@ -96,6 +98,8 @@ let allProfessors = [];
 let allResults = [];
 let selectedResultsExamId = null;
 let selectedResultDetailsId = null;
+let canManageAccounts = true;
+let activeTestLocks = [];
 
 if (user) {
   professorName.textContent = user.full_name || "Profesor";
@@ -212,11 +216,11 @@ Afiseaza utilizatorii grupati pe grupe, permite import Excel si stergere doar pe
 */
 function renderUsers(users) {
   if (!users.length) {
-    usersTableBody.innerHTML = `<tr><td colspan="${canManageUsers ? 6 : 4}">Nu exista utilizatori.</td></tr>`;
+    usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">Nu exista utilizatori.</td></tr>`;
     return;
   }
 
-  const columnsCount = canManageUsers ? 6 : 4;
+  const columnsCount = canManageAccounts ? 6 : 4;
   const students = users
     .filter((item) => item.role === "student")
     .sort((first, second) => {
@@ -239,7 +243,7 @@ function renderUsers(users) {
       <td>${escapeHtml(item.role) || "-"}</td>
       <td>${escapeHtml(item.email) || "-"}</td>
       <td>${escapeHtml(item.matriculation_number) || "-"}</td>
-      ${canManageUsers ? `
+      ${canManageAccounts ? `
         <td>
           <div class="secret-cell">
             <span data-secret-value="${escapeHtml(item.unique_code)}">••••••</span>
@@ -249,7 +253,7 @@ function renderUsers(users) {
           </div>
         </td>
       ` : ""}
-      ${canManageUsers ? `
+      ${canManageAccounts ? `
         <td>
           <button class="danger-button" type="button" data-delete-user="${item.id}">
             Sterge
@@ -270,7 +274,7 @@ function renderUsers(users) {
           <td colspan="${columnsCount}">
             <div class="group-row-content">
               <span>Grupa ${escapeHtml(groupName)}</span>
-              ${canManageUsers ? `
+              ${canManageAccounts ? `
                 <button class="danger-button group-delete-button" type="button" data-delete-group="${escapeHtml(groupName)}">
                   Sterge grupa
                 </button>
@@ -300,12 +304,13 @@ async function loadUsers(options = {}) {
   const silent = options.silent === true;
 
   if (!silent) {
-    usersTableBody.innerHTML = `<tr><td colspan="${canManageUsers ? 6 : 4}">Se incarca...</td></tr>`;
+    usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">Se incarca...</td></tr>`;
   }
 
   try {
     const data = await apiRequest("/admin/users");
-    canManageUsers = Boolean(data.canManageUsers);
+    canManageAccounts = Boolean(data.canManageUsers);
+    canManageUsers = Boolean(data.canManageAllUsers);
     updateUserManagementVisibility();
     renderUsers(data.users);
   } catch (error) {
@@ -313,14 +318,26 @@ async function loadUsers(options = {}) {
       return;
     }
 
-    usersTableBody.innerHTML = `<tr><td colspan="${canManageUsers ? 6 : 4}">${escapeHtml(error.message)}</td></tr>`;
+    usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
 function updateUserManagementVisibility() {
-  createUserPanel.classList.toggle("hidden", !canManageUsers);
-  importUsersPanel.classList.toggle("hidden", !canManageUsers);
-  readonlyUsersNotice.classList.toggle("hidden", canManageUsers);
+  createUserPanel.classList.toggle("hidden", !canManageAccounts);
+  importUsersPanel.classList.toggle("hidden", !canManageAccounts);
+  readonlyUsersNotice.classList.toggle("hidden", canManageAccounts);
+  const professorRoleOption = roleSelect.querySelector('option[value="professor"]');
+
+  if (professorRoleOption) {
+    professorRoleOption.hidden = !canManageUsers;
+    professorRoleOption.disabled = !canManageUsers;
+  }
+
+  if (!canManageUsers && roleSelect.value === "professor") {
+    roleSelect.value = "student";
+    updateRoleFields();
+  }
+
   subjectAdminPanel.classList.toggle("hidden", !canManageUsers);
   subjectReadonlyNotice.classList.toggle("hidden", canManageUsers);
   subjectAssignmentPanel.classList.toggle("hidden", !canManageUsers);
@@ -329,6 +346,9 @@ function updateUserManagementVisibility() {
   });
   document.querySelectorAll("[data-admin-only-column]").forEach((cell) => {
     cell.classList.toggle("hidden", !canManageUsers);
+  });
+  document.querySelectorAll("[data-account-manager-column]").forEach((cell) => {
+    cell.classList.toggle("hidden", !canManageAccounts);
   });
 }
 
@@ -693,7 +713,10 @@ function renderResultExamList(results) {
   }
 
   resultsExamList.innerHTML = groups.map((group) => {
-    const average = group.results.reduce((total, result) => total + Number(result.grade || 0), 0) / group.results.length;
+    const gradedResults = group.results.filter((result) => !isPlagiarismResult(result));
+    const average = gradedResults.length
+      ? gradedResults.reduce((total, result) => total + Number(result.grade || 0), 0) / gradedResults.length
+      : null;
 
     return `
       <button class="exam-card result-exam-card" type="button" data-open-result-exam="${group.exam_id}">
@@ -705,7 +728,9 @@ function renderResultExamList(results) {
             <span>${group.results.length} rezultate</span>
           </div>
         </div>
-        <span class="status-badge status-active">Media ${escapeHtml(Number(average.toFixed(2)))}</span>
+        <span class="status-badge ${average === null ? "status-plagiarism" : "status-active"}">
+          ${average === null ? "Fara note" : `Media ${escapeHtml(Number(average.toFixed(2)))}`}
+        </span>
       </button>
     `;
   }).join("");
@@ -745,12 +770,17 @@ function renderResultsForExam(examId, options = {}) {
       <td>${escapeHtml(result.subject_name)}</td>
       <td>${escapeHtml(result.exam_title)}</td>
       <td>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)}</td>
-      <td><span class="status-badge status-active">${escapeHtml(result.grade)}</span></td>
+      <td>${renderGradeBadge(result)}</td>
       <td>${formatExamDate(result.submitted_at)}</td>
       <td>
-        <button class="secondary-button" type="button" data-result-details="${result.id}">
-          Detalii
-        </button>
+        <div class="action-row">
+          ${Number(result.event_count || 0) > 0 ? `
+            <span class="problem-indicator" title="Exista evenimente in timpul testului">!</span>
+          ` : ""}
+          <button class="secondary-button" type="button" data-result-details="${result.id}">
+            Detalii
+          </button>
+        </div>
       </td>
     </tr>
   `).join("");
@@ -767,13 +797,16 @@ async function ensureResultsLoaded() {
 }
 
 async function downloadArchiveRegister(examId) {
+  const results = (await ensureResultsLoaded()).filter((result) => String(result.exam_id) === String(examId));
   const exam = allExams.find((item) => String(item.id) === String(examId));
+  const firstResult = results[0];
 
-  if (!exam) {
+  if (!exam && !firstResult) {
     return;
   }
 
-  const results = (await ensureResultsLoaded()).filter((result) => String(result.exam_id) === String(examId));
+  const subjectName = exam?.subject_name || firstResult.subject_name || "materie";
+  const examTitle = exam?.title || firstResult.exam_title || "examen";
   const rows = [
     ["Nume student", "Grupa", "Materie", "Examen", "Varianta", "Rand", "Nota"],
     ...results.map((result) => [
@@ -783,7 +816,7 @@ async function downloadArchiveRegister(examId) {
       result.exam_title,
       result.variant_name || "-",
       result.row_number || "-",
-      result.grade,
+      isPlagiarismResult(result) ? "Plagiat" : result.grade,
     ]),
   ];
   const tableRows = rows.map((row, rowIndex) => `
@@ -814,7 +847,7 @@ async function downloadArchiveRegister(examId) {
     type: "application/vnd.ms-excel;charset=utf-8;",
   });
   const link = document.createElement("a");
-  const safeName = `${exam.subject_name}-${exam.title}`
+  const safeName = `${subjectName}-${examTitle}`
     .replace(/[^\w\-]+/g, "_")
     .replace(/_+/g, "_");
 
@@ -824,6 +857,100 @@ async function downloadArchiveRegister(examId) {
   link.click();
   URL.revokeObjectURL(link.href);
   link.remove();
+}
+
+/*
+----------------------------
+      Notificari test live
+----------------------------
+Afiseaza studentii blocati in timpul testului si permite profesorului sa ii deblocheze.
+*/
+function getLockLabel(eventType) {
+  const labels = {
+    alt_tab: "Alt+Tab",
+    blocked_key: "Tasta blocata",
+    fullscreen_exit: "Iesire fullscreen",
+    fullscreen_refused: "Fullscreen refuzat",
+    plagiarism_closed: "Test incheiat",
+    tab_hidden: "Tab schimbat",
+    window_blur: "Fereastra fara focus",
+  };
+
+  return labels[eventType] || eventType || "Eveniment test";
+}
+
+function isPlagiarismResult(result) {
+  return result
+    && result.grade === null
+    && Number(result.score) === 0
+    && Number(result.max_score) === 0;
+}
+
+function renderGradeBadge(result) {
+  if (isPlagiarismResult(result)) {
+    return '<span class="status-badge status-plagiarism">Plagiat</span>';
+  }
+
+  return `<span class="status-badge status-active">${escapeHtml(result.grade)}</span>`;
+}
+
+function renderTestLockNotifications() {
+  if (!testLockNotifications) {
+    return;
+  }
+
+  if (!activeTestLocks.length) {
+    testLockNotifications.classList.add("hidden");
+    testLockNotifications.innerHTML = "";
+    return;
+  }
+
+  testLockNotifications.classList.remove("hidden");
+  testLockNotifications.innerHTML = activeTestLocks.map((lock) => `
+    <article class="test-lock-card">
+      <h3>Student blocat in test</h3>
+      <p><strong>${escapeHtml(lock.student_name)}</strong> - ${escapeHtml(lock.subject_name)}</p>
+      <p>${escapeHtml(lock.exam_title)} | ${escapeHtml(getLockLabel(lock.event_type))}</p>
+      <p>${escapeHtml(lock.details || "Eveniment detectat in timpul testului.")}</p>
+      <p>${formatExamDate(lock.created_at)}</p>
+      <div class="test-lock-actions">
+        <button class="primary-button" type="button" data-release-test-lock="${lock.id}">
+          Permite continuarea
+        </button>
+        <button class="danger-button" type="button" data-plagiarism-test-lock="${lock.id}">
+          Incheie test
+        </button>
+      </div>
+    </article>
+  `).join("");
+}
+
+async function loadActiveTestLocks() {
+  try {
+    const data = await apiRequest("/admin/test-locks");
+    activeTestLocks = data.locks || [];
+    renderTestLockNotifications();
+  } catch (error) {
+    // Notificarile live nu trebuie sa blocheze dashboard-ul daca API-ul raspunde temporar greu.
+  }
+}
+
+async function releaseTestLock(lockId) {
+  await apiRequest(`/admin/test-locks/${lockId}/release`, {
+    method: "POST",
+  });
+  activeTestLocks = activeTestLocks.filter((lock) => String(lock.id) !== String(lockId));
+  renderTestLockNotifications();
+  await loadResults({ silent: true });
+}
+
+async function markTestLockPlagiarism(lockId) {
+  await apiRequest(`/admin/test-locks/${lockId}/plagiarism`, {
+    method: "POST",
+  });
+  activeTestLocks = activeTestLocks.filter((lock) => String(lock.id) !== String(lockId));
+  renderTestLockNotifications();
+  await loadResults({ silent: true });
 }
 
 async function loadResults(options = {}) {
@@ -904,9 +1031,10 @@ function getReviewAnswerState(answer) {
 function renderResultDetails(data) {
   const result = data.result;
   const events = data.events || [];
+  const gradeText = isPlagiarismResult(result) ? "Plagiat" : `Nota ${result.grade}`;
 
   resultDetailsTitle.textContent = `${result.student_name} - ${result.exam_title}`;
-  resultDetailsMeta.textContent = `${result.subject_name} | ${result.variant_name || "Varianta neidentificata"} | ${result.score} / ${result.max_score} puncte | Nota ${result.grade}`;
+  resultDetailsMeta.textContent = `${result.subject_name} | ${result.variant_name || "Varianta neidentificata"} | ${result.score} / ${result.max_score} puncte | ${gradeText}`;
   resultDetailsContent.innerHTML = `
     ${events.length ? `
       <article class="review-question-card">
@@ -1194,6 +1322,49 @@ backToResultExamsButton.addEventListener("click", () => {
   resultDetailsContent.innerHTML = "";
   resultsExamList.scrollIntoView({ behavior: "smooth", block: "start" });
 });
+
+downloadResultsExcelButton.addEventListener("click", async () => {
+  if (!selectedResultsExamId) {
+    return;
+  }
+
+  await downloadArchiveRegister(selectedResultsExamId);
+});
+
+if (testLockNotifications) {
+  testLockNotifications.addEventListener("click", async (event) => {
+    const releaseButton = event.target.closest("[data-release-test-lock]");
+    const plagiarismButton = event.target.closest("[data-plagiarism-test-lock]");
+    const button = releaseButton || plagiarismButton;
+
+    if (!button) {
+      return;
+    }
+
+    if (plagiarismButton) {
+      const confirmed = window.confirm("Inchei testul si marchezi studentul cu Plagiat?");
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    button.disabled = true;
+    button.textContent = releaseButton ? "Se permite..." : "Se inchide...";
+
+    try {
+      if (releaseButton) {
+        await releaseTestLock(button.dataset.releaseTestLock);
+      } else {
+        await markTestLockPlagiarism(button.dataset.plagiarismTestLock);
+      }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = releaseButton ? "Permite continuarea" : "Incheie test";
+      alert(error.message);
+    }
+  });
+}
 
 document.querySelectorAll("[data-exam-filter]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1831,4 +2002,8 @@ setInterval(() => {
   if (activeSectionId === "resultsSection") {
     loadResults({ silent: true });
   }
+
+  loadActiveTestLocks();
 }, 3000);
+
+loadActiveTestLocks();

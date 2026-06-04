@@ -111,7 +111,7 @@ function parseStudentsFromExcel(buffer) {
         Listare utilizatori
 ----------------------------
 */
-// Adminul vede toate conturile, iar profesorul normal vede doar lista studentilor.
+// Adminul vede toate conturile; profesorii pot administra studentii, inclusiv codurile lor de acces.
 async function listUsers(req, res) {
   try {
     const pool = await getPool();
@@ -124,14 +124,15 @@ async function listUsers(req, res) {
           ORDER BY created_at DESC
         `)
       : await request.query(`
-          SELECT id, full_name, email, role, matriculation_number, created_at
+          SELECT id, full_name, email, role, matriculation_number, unique_code, created_at
           FROM users
           WHERE role = 'student'
-          ORDER BY created_at DESC
+          ORDER BY matriculation_number, full_name
         `);
 
     res.json({
-      canManageUsers: admin,
+      canManageUsers: true,
+      canManageAllUsers: admin,
       users: result.recordset,
     });
   } catch (error) {
@@ -171,6 +172,12 @@ async function createUser(req, res) {
       });
     }
 
+    if (!isAdminUser(req.user) && role !== "student") {
+      return res.status(403).json({
+        message: "Profesorii pot crea doar conturi de student.",
+      });
+    }
+
     if (role === "professor" && (!email || !password)) {
       return res.status(400).json({
         message: "Pentru profesor sunt obligatorii emailul si parola.",
@@ -179,6 +186,12 @@ async function createUser(req, res) {
 
     const pool = await getPool();
     const isAdminCode = uniqueCode === process.env.ADMIN_UNIQUE_CODE;
+
+    if (!isAdminUser(req.user) && isAdminCode) {
+      return res.status(403).json({
+        message: "Doar adminul principal poate crea conturi cu cod de admin.",
+      });
+    }
 
     const existingUser = await pool
       .request()
@@ -366,6 +379,10 @@ async function deleteExamTree(transaction, examId) {
 
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
+    .query("DELETE FROM student_test_locks WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
     .query("DELETE FROM student_test_events WHERE exam_id = @examId");
 
   await new sql.Request(transaction)
@@ -418,6 +435,10 @@ async function deleteStudentData(transaction, userId) {
   await new sql.Request(transaction)
     .input("userId", sql.Int, userId)
     .query("DELETE FROM student_answer_drafts WHERE student_id = @userId");
+
+  await new sql.Request(transaction)
+    .input("userId", sql.Int, userId)
+    .query("DELETE FROM student_test_locks WHERE student_id = @userId");
 
   await new sql.Request(transaction)
     .input("userId", sql.Int, userId)
@@ -492,7 +513,7 @@ async function deleteUser(req, res) {
     const userResult = await pool
       .request()
       .input("id", sql.Int, userId)
-      .query("SELECT TOP 1 id, role FROM users WHERE id = @id");
+      .query("SELECT TOP 1 id, role, unique_code FROM users WHERE id = @id");
 
     if (userResult.recordset.length === 0) {
       return res.status(404).json({
@@ -504,7 +525,22 @@ async function deleteUser(req, res) {
     await transaction.begin();
 
     try {
-      const role = userResult.recordset[0].role;
+      const targetUser = userResult.recordset[0];
+      const role = targetUser.role;
+
+      if (!isAdminUser(req.user) && role !== "student") {
+        await transaction.rollback();
+        return res.status(403).json({
+          message: "Profesorii pot sterge doar conturi de student.",
+        });
+      }
+
+      if (targetUser.unique_code === process.env.ADMIN_UNIQUE_CODE) {
+        await transaction.rollback();
+        return res.status(403).json({
+          message: "Contul principal de admin nu poate fi sters.",
+        });
+      }
 
       if (role === "student") {
         await deleteStudentData(transaction, userId);

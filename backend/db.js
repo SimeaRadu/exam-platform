@@ -453,6 +453,42 @@ async function ensureSchema() {
     `);
 
     await pool.request().query(`
+      IF OBJECT_ID('student_test_locks', 'U') IS NULL
+      BEGIN
+        CREATE TABLE student_test_locks (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          student_id INT NOT NULL,
+          exam_id INT NOT NULL,
+          event_type NVARCHAR(50) NOT NULL,
+          details NVARCHAR(500) NULL,
+          is_active BIT NOT NULL DEFAULT 1,
+          created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          released_at DATETIME2 NULL,
+          released_by INT NULL,
+          CONSTRAINT FK_test_locks_student
+            FOREIGN KEY (student_id) REFERENCES users(id),
+          CONSTRAINT FK_test_locks_exam
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+          CONSTRAINT FK_test_locks_released_by
+            FOREIGN KEY (released_by) REFERENCES users(id)
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = 'UX_student_test_locks_active'
+          AND object_id = OBJECT_ID('student_test_locks')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX UX_student_test_locks_active
+        ON student_test_locks(student_id, exam_id)
+        WHERE is_active = 1
+      END
+    `);
+
+    await pool.request().query(`
       IF COL_LENGTH('questions', 'image_original_name') IS NULL
       BEGIN
         ALTER TABLE questions ADD image_original_name NVARCHAR(255) NULL

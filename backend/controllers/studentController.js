@@ -11,8 +11,8 @@ const { getPool, sql } = require("../db");
       Asignare varianta student
 ----------------------------
 */
-// Gaseste varianta deja asignata studentului sau ii da automat prima varianta disponibila.
-async function getOrCreateStudentAssignment(pool, studentId, examId) {
+// Gaseste varianta deja asignata studentului. Studentul trebuie sa aleaga randul inainte de start.
+async function getStudentAssignment(pool, studentId, examId) {
   const assignmentResult = await pool
     .request()
     .input("studentId", sql.Int, studentId)
@@ -27,14 +27,19 @@ async function getOrCreateStudentAssignment(pool, studentId, examId) {
     return assignmentResult.recordset[0];
   }
 
+  return null;
+}
+
+async function assignStudentRow(pool, studentId, examId, rowNumber) {
   const variantResult = await pool
     .request()
     .input("examId", sql.Int, examId)
+    .input("rowNumber", sql.Int, rowNumber)
     .query(`
       SELECT TOP 1 id, row_number
       FROM exam_variants
-      WHERE exam_id = @examId
-      ORDER BY row_number, id
+      WHERE exam_id = @examId AND row_number = @rowNumber
+      ORDER BY id
     `);
 
   if (variantResult.recordset.length === 0) {
@@ -49,10 +54,18 @@ async function getOrCreateStudentAssignment(pool, studentId, examId) {
     .input("variantId", sql.Int, variant.id)
     .input("rowNumber", sql.Int, variant.row_number)
     .query(`
-      INSERT INTO student_exam_assignments (student_id, exam_id, variant_id, row_number)
+      MERGE student_exam_assignments AS target
+      USING (
+        SELECT @studentId AS student_id, @examId AS exam_id
+      ) AS source
+      ON target.student_id = source.student_id AND target.exam_id = source.exam_id
+      WHEN MATCHED THEN
+        UPDATE SET variant_id = @variantId, row_number = @rowNumber
+      WHEN NOT MATCHED THEN
+        INSERT (student_id, exam_id, variant_id, row_number)
+        VALUES (@studentId, @examId, @variantId, @rowNumber)
       OUTPUT INSERTED.id, INSERTED.student_id, INSERTED.exam_id,
-             INSERTED.variant_id, INSERTED.row_number
-      VALUES (@studentId, @examId, @variantId, @rowNumber)
+             INSERTED.variant_id, INSERTED.row_number;
     `);
 
   return createdAssignment.recordset[0];
@@ -266,21 +279,6 @@ async function saveDraftAnswers(transaction, studentId, examId, questions, answe
 
 /*
 ----------------------------
-     Activare examene scadente
-----------------------------
-*/
-// Porneste automat examenele programate cand data lor a trecut.
-async function activateDueExams(pool) {
-  await pool.request().query(`
-    UPDATE exams
-    SET status = 'active'
-    WHERE status = 'future'
-      AND exam_date <= GETDATE()
-  `);
-}
-
-/*
-----------------------------
        Examene student
 ----------------------------
 */
@@ -288,7 +286,6 @@ async function activateDueExams(pool) {
 async function listStudentExams(req, res) {
   try {
     const pool = await getPool();
-    await activateDueExams(pool);
     const subjectsResult = await pool
       .request()
       .query(`
@@ -303,9 +300,13 @@ async function listStudentExams(req, res) {
         SELECT e.id, e.title, e.exam_date, e.status, e.bonus_points,
                s.id AS subject_id, s.name AS subject_name,
                s.info_text AS subject_info, s.rules_text AS subject_rules,
+               sea.variant_id AS assigned_variant_id,
+               sea.row_number AS assigned_row_number,
                CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS has_result
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
+        LEFT JOIN student_exam_assignments sea
+          ON sea.exam_id = e.id AND sea.student_id = @studentId
         LEFT JOIN results r ON r.exam_id = e.id AND r.student_id = @studentId
         WHERE e.status IN ('future', 'active', 'finished', 'archived')
         ORDER BY
@@ -317,14 +318,134 @@ async function listStudentExams(req, res) {
           END,
           e.exam_date ASC
       `);
+    const variantsResult = await pool
+      .request()
+      .query(`
+        SELECT v.exam_id, v.id, v.variant_name, v.row_number
+        FROM exam_variants v
+        INNER JOIN exams e ON e.id = v.exam_id
+        WHERE e.status IN ('future', 'active', 'finished', 'archived')
+        ORDER BY v.exam_id, v.row_number, v.id
+      `);
+    const variantsByExam = new Map();
+
+    variantsResult.recordset.forEach((variant) => {
+      const examKey = Number(variant.exam_id);
+
+      if (!variantsByExam.has(examKey)) {
+        variantsByExam.set(examKey, []);
+      }
+
+      variantsByExam.get(examKey).push({
+        id: variant.id,
+        variant_name: variant.variant_name,
+        row_number: variant.row_number,
+      });
+    });
 
     res.json({
       subjects: subjectsResult.recordset,
-      exams: result.recordset,
+      exams: result.recordset.map((exam) => ({
+        ...exam,
+        row_options: variantsByExam.get(Number(exam.id)) || [],
+      })),
     });
   } catch (error) {
     res.status(500).json({
       message: "Eroare la citirea examenelor pentru student.",
+      error: error.message,
+    });
+  }
+}
+
+/*
+----------------------------
+       Alegere rand test
+----------------------------
+*/
+// Studentul alege randul, iar backend-ul ii asigneaza varianta pregatita de profesor pentru acel rand.
+async function chooseStudentExamRow(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+    const rowNumber = Number(req.body.rowNumber);
+
+    if (!Number.isInteger(examId) || !Number.isInteger(rowNumber)) {
+      return res.status(400).json({
+        message: "Alege un rand valid inainte sa pornesti examenul.",
+      });
+    }
+
+    const pool = await getPool();
+    const examResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 id, status
+        FROM exams
+        WHERE id = @examId
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({
+        message: "Examenul nu a fost gasit.",
+      });
+    }
+
+    if (examResult.recordset[0].status !== "active") {
+      return res.status(403).json({
+        message: "Examenul nu este activ.",
+      });
+    }
+
+    const existingResult = await pool
+      .request()
+      .input("studentId", sql.Int, req.user.id)
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 id
+        FROM results
+        WHERE student_id = @studentId AND exam_id = @examId
+      `);
+
+    if (existingResult.recordset.length > 0) {
+      return res.status(409).json({
+        message: "Ai trimis deja acest test.",
+      });
+    }
+
+    const existingAssignment = await getStudentAssignment(pool, req.user.id, examId);
+
+    if (existingAssignment && Number(existingAssignment.row_number) === rowNumber) {
+      return res.json({
+        message: "Randul era deja ales.",
+        assignment: existingAssignment,
+      });
+    }
+
+    const assignment = await assignStudentRow(pool, req.user.id, examId, rowNumber);
+
+    if (!assignment) {
+      return res.status(404).json({
+        message: "Profesorul nu a setat o varianta pentru randul ales.",
+      });
+    }
+
+    await pool
+      .request()
+      .input("studentId", sql.Int, req.user.id)
+      .input("examId", sql.Int, examId)
+      .query(`
+        DELETE FROM student_answer_drafts
+        WHERE student_id = @studentId AND exam_id = @examId
+      `);
+
+    res.status(201).json({
+      message: "Rand ales.",
+      assignment,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la alegerea randului.",
       error: error.message,
     });
   }
@@ -389,11 +510,11 @@ async function getStudentTest(req, res) {
       });
     }
 
-    const assignment = await getOrCreateStudentAssignment(pool, req.user.id, examId);
+    const assignment = await getStudentAssignment(pool, req.user.id, examId);
 
     if (!assignment) {
-      return res.status(404).json({
-        message: "Examenul nu are variante create.",
+      return res.status(400).json({
+        message: "Alege randul inainte sa pornesti examenul.",
       });
     }
 
@@ -519,11 +640,11 @@ async function submitStudentTest(req, res) {
       });
     }
 
-    const assignment = await getOrCreateStudentAssignment(pool, req.user.id, examId);
+    const assignment = await getStudentAssignment(pool, req.user.id, examId);
 
     if (!assignment) {
-      return res.status(404).json({
-        message: "Examenul nu are variante create.",
+      return res.status(400).json({
+        message: "Alege randul inainte sa trimiti examenul.",
       });
     }
 
@@ -682,11 +803,11 @@ async function autosaveStudentTest(req, res) {
       });
     }
 
-    const assignment = await getOrCreateStudentAssignment(pool, req.user.id, examId);
+    const assignment = await getStudentAssignment(pool, req.user.id, examId);
 
     if (!assignment) {
-      return res.status(404).json({
-        message: "Examenul nu are variante create.",
+      return res.status(400).json({
+        message: "Alege randul inainte sa rezolvi examenul.",
       });
     }
 
@@ -749,12 +870,97 @@ async function recordStudentTestEvent(req, res) {
         VALUES (@studentId, @examId, @eventType, @details)
       `);
 
+    await pool
+      .request()
+      .input("studentId", sql.Int, req.user.id)
+      .input("examId", sql.Int, examId)
+      .input("eventType", sql.NVarChar(50), eventType.slice(0, 50))
+      .input("details", sql.NVarChar(500), details ? details.slice(0, 500) : null)
+      .query(`
+        IF EXISTS (
+          SELECT 1
+          FROM student_test_locks
+          WHERE student_id = @studentId
+            AND exam_id = @examId
+            AND is_active = 1
+        )
+        BEGIN
+          UPDATE student_test_locks
+          SET event_type = @eventType,
+              details = @details,
+              created_at = SYSUTCDATETIME()
+          WHERE student_id = @studentId
+            AND exam_id = @examId
+            AND is_active = 1
+        END
+        ELSE
+        BEGIN
+          INSERT INTO student_test_locks (student_id, exam_id, event_type, details)
+          VALUES (@studentId, @examId, @eventType, @details)
+        END
+      `);
+
     res.json({
       message: "Eveniment salvat.",
+      locked: true,
     });
   } catch (error) {
     res.status(500).json({
       message: "Eroare la salvarea evenimentului.",
+      error: error.message,
+    });
+  }
+}
+
+async function getStudentTestLockStatus(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(examId)) {
+      return res.status(400).json({
+        message: "ID examen invalid.",
+      });
+    }
+
+    const pool = await getPool();
+    const lockResult = await pool
+      .request()
+      .input("studentId", sql.Int, req.user.id)
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 id, event_type, details, created_at
+        FROM student_test_locks
+        WHERE student_id = @studentId
+          AND exam_id = @examId
+          AND is_active = 1
+        ORDER BY created_at DESC
+      `);
+    const resultCheck = await pool
+      .request()
+      .input("studentId", sql.Int, req.user.id)
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 id, score, max_score, grade, submitted_at
+        FROM results
+        WHERE student_id = @studentId AND exam_id = @examId
+      `);
+    const completedResult = resultCheck.recordset[0] || null;
+
+    res.json({
+      locked: lockResult.recordset.length > 0,
+      lock: lockResult.recordset[0] || null,
+      completed: Boolean(completedResult),
+      isPlagiarism: Boolean(
+        completedResult
+        && completedResult.grade === null
+        && Number(completedResult.score) === 0
+        && Number(completedResult.max_score) === 0
+      ),
+      result: completedResult,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la verificarea blocarii testului.",
       error: error.message,
     });
   }
@@ -933,7 +1139,9 @@ async function getStudentResultDetails(req, res) {
 
 module.exports = {
   autosaveStudentTest,
+  chooseStudentExamRow,
   getStudentTest,
+  getStudentTestLockStatus,
   heartbeatStudentSession,
   listStudentExams,
   listStudentResults,

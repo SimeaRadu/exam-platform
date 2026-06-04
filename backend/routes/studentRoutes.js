@@ -7,7 +7,9 @@
 const express = require("express");
 const {
   autosaveStudentTest,
+  chooseStudentExamRow,
   getStudentTest,
+  getStudentTestLockStatus,
   heartbeatStudentSession,
   listStudentExams,
   listStudentResults,
@@ -33,7 +35,9 @@ router.use(requireRole("student"));
 router.get("/exams", listStudentExams);
 router.get("/results", listStudentResults);
 router.post("/heartbeat", heartbeatStudentSession);
+router.post("/exams/:examId/row", chooseStudentExamRow);
 router.get("/exams/:examId/test", getStudentTest);
+router.get("/exams/:examId/lock-status", getStudentTestLockStatus);
 router.post("/exams/:examId/autosave", autosaveStudentTest);
 router.post("/exams/:examId/events", recordStudentTestEvent);
 router.post("/exams/:examId/submit", submitStudentTest);

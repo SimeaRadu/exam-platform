@@ -31,7 +31,8 @@ const studentProfileContent = document.getElementById("studentProfileContent");
 const studentStatusList = document.getElementById("studentStatusList");
 const studentRulesContent = document.getElementById("studentRulesContent");
 const fullscreenLockOverlay = document.getElementById("fullscreenLockOverlay");
-const returnFullscreenButton = document.getElementById("returnFullscreenButton");
+const fullscreenLockTitle = document.getElementById("fullscreenLockTitle");
+const fullscreenLockMessage = document.getElementById("fullscreenLockMessage");
 
 let studentExams = [];
 let studentSubjects = [];
@@ -41,9 +42,12 @@ let selectedSubjectId = null;
 let studentExamsLoaded = false;
 let activeTest = null;
 let selectedAnswersByQuestion = new Map();
+let selectedRowsByExam = new Map();
 let autosaveTimer = null;
 let lastEventLogAt = new Map();
 let isSubmittingTest = false;
+let serverTestLockActive = false;
+let localTestLockPending = false;
 
 if (user) {
   studentName.textContent = user.full_name || "Student";
@@ -92,6 +96,21 @@ function getStatusText(status) {
   }
 
   return "Terminat";
+}
+
+function isPlagiarismResult(result) {
+  return result
+    && result.grade === null
+    && Number(result.score) === 0
+    && Number(result.max_score) === 0;
+}
+
+function renderStudentGradeBadge(result) {
+  if (isPlagiarismResult(result)) {
+    return '<span class="status-badge status-plagiarism">Plagiat</span>';
+  }
+
+  return `<span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>`;
 }
 
 function groupSubjects(subjects, exams) {
@@ -173,13 +192,64 @@ function renderExamList(container, exams, emptyText) {
         ${getStatusText(exam.status)}
       </span>
       ${exam.status === "active" && !exam.has_result ? `
-        <button class="primary-button" type="button" data-start-test="${exam.id}">Rezolva</button>
+        ${renderExamRowPicker(exam)}
       ` : ""}
       ${exam.status === "active" && exam.has_result ? `
         <span class="muted-note">Trimis deja</span>
       ` : ""}
     </article>
   `).join("");
+}
+
+function getExamRowOptions(exam) {
+  const rowsByNumber = new Map();
+
+  (exam.row_options || []).forEach((variant) => {
+    const rowNumber = Number(variant.row_number);
+
+    if (Number.isInteger(rowNumber) && !rowsByNumber.has(rowNumber)) {
+      rowsByNumber.set(rowNumber, variant);
+    }
+  });
+
+  return [...rowsByNumber.values()]
+    .sort((first, second) => Number(first.row_number) - Number(second.row_number));
+}
+
+function renderExamRowPicker(exam) {
+  const rowOptions = getExamRowOptions(exam);
+  const assignedRow = Number(exam.assigned_row_number);
+  const hasAssignedRow = Number.isInteger(assignedRow);
+  const locallySelectedRow = Number(selectedRowsByExam.get(String(exam.id)));
+  const selectedRow = Number.isInteger(locallySelectedRow) ? locallySelectedRow : assignedRow;
+  const hasSelectedRow = Number.isInteger(selectedRow);
+
+  if (!rowOptions.length) {
+    return `<span class="muted-note">Profesorul nu a setat randuri pentru variante.</span>`;
+  }
+
+  return `
+    <div class="exam-start-controls">
+      <label class="compact-field">
+        <select data-exam-row-select="${exam.id}">
+          <option value="">Alege randul</option>
+          ${rowOptions.map((variant) => `
+            <option value="${escapeHtml(variant.row_number)}" ${hasSelectedRow && selectedRow === Number(variant.row_number) ? "selected" : ""}>
+              Rand ${escapeHtml(variant.row_number)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+      <button
+        class="primary-button"
+        type="button"
+        data-start-test="${exam.id}"
+        ${hasSelectedRow ? "" : "disabled"}
+      >
+        Rezolva
+      </button>
+    </div>
+  `;
 }
 
 function getSubjectName(subjectId) {
@@ -243,7 +313,7 @@ function renderGlobalStudentPanels() {
             <span>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)} puncte</span>
           </div>
         </div>
-        <span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>
+        ${renderStudentGradeBadge(result)}
       </article>
     `).join("")
     : "<p>Nu exista note salvate.</p>";
@@ -400,7 +470,7 @@ function renderStudentResults() {
           <span>Raspunsuri gresite selectate: ${escapeHtml(result.wrong_answers_count || 0)}</span>
         </div>
       </div>
-      <span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>
+      ${renderStudentGradeBadge(result)}
     </article>
   `).join("");
 }
@@ -493,11 +563,22 @@ function setFullscreenLock(isLocked) {
     return;
   }
 
+  if (fullscreenLockTitle && fullscreenLockMessage) {
+    fullscreenLockTitle.textContent = "Test blocat";
+    fullscreenLockMessage.textContent = "A fost detectat un eveniment in timpul testului. Asteapta aprobarea profesorului ca sa continui.";
+  }
+
   fullscreenLockOverlay.classList.toggle("hidden", !isLocked);
   document.body.classList.toggle("test-fullscreen-locked", isLocked);
   solveTestForm.querySelectorAll("button, input").forEach((element) => {
     element.disabled = isLocked;
   });
+}
+
+function activateTestLock() {
+  serverTestLockActive = true;
+  localTestLockPending = true;
+  setFullscreenLock(true);
 }
 
 function enforceFullscreenLock() {
@@ -506,7 +587,7 @@ function enforceFullscreenLock() {
     return;
   }
 
-  setFullscreenLock(!document.fullscreenElement);
+  setFullscreenLock(serverTestLockActive || localTestLockPending);
 }
 
 /*
@@ -575,6 +656,8 @@ async function logTestEvent(eventType, details = "") {
     return;
   }
 
+  activateTestLock();
+
   const now = Date.now();
   const lastLogged = lastEventLogAt.get(eventType) || 0;
 
@@ -585,12 +668,64 @@ async function logTestEvent(eventType, details = "") {
   lastEventLogAt.set(eventType, now);
 
   try {
-    await apiRequest(`/student/exams/${activeTest.exam.id}/events`, {
+    const data = await apiRequest(`/student/exams/${activeTest.exam.id}/events`, {
       method: "POST",
       body: JSON.stringify({ eventType, details }),
     });
+
+    serverTestLockActive = Boolean(data.locked);
+    localTestLockPending = !serverTestLockActive;
+    setFullscreenLock(serverTestLockActive || localTestLockPending);
   } catch (error) {
-    // Evenimentele sunt doar audit; testul nu trebuie blocat daca auditul cade.
+    solveTestMessage.textContent = "Testul este blocat, dar notificarea nu a ajuns la server. Verifica conexiunea sau anunta profesorul.";
+    solveTestMessage.className = "message form-message error";
+    activateTestLock();
+  }
+}
+
+async function refreshTestLockStatus() {
+  if (!activeTest || isSubmittingTest) {
+    return;
+  }
+
+  try {
+    const data = await apiRequest(`/student/exams/${activeTest.exam.id}/lock-status`);
+
+    if (data.completed) {
+      clearTimeout(autosaveTimer);
+      activeTest = null;
+      serverTestLockActive = false;
+      localTestLockPending = false;
+      setFullscreenLock(false);
+      await exitTestFullscreen();
+      await Promise.all([loadStudentExams({ silent: true }), loadStudentResults({ silent: true })]);
+      solveTestMessage.textContent = data.isPlagiarism
+        ? "Testul a fost incheiat de profesor si marcat ca plagiat."
+        : "Testul a fost incheiat.";
+      solveTestMessage.className = data.isPlagiarism
+        ? "message form-message error"
+        : "message form-message success";
+      showSubjectSubsection("subjectExamsPanel");
+      studentSubjectMenuSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    serverTestLockActive = Boolean(data.locked);
+
+    if (serverTestLockActive) {
+      localTestLockPending = false;
+      setFullscreenLock(true);
+      return;
+    }
+
+    if (localTestLockPending) {
+      setFullscreenLock(true);
+      return;
+    }
+
+    setFullscreenLock(false);
+  } catch (error) {
+    // Daca verificarea cade, lasam starea curenta neschimbata ca sa nu deblocam gresit testul.
   }
 }
 
@@ -603,12 +738,21 @@ Gestioneaza intrarea si revenirea in fullscreen in timpul rezolvarii testului.
 async function enterTestFullscreen() {
   try {
     if (document.fullscreenElement || !document.documentElement.requestFullscreen) {
-      setFullscreenLock(false);
+      await refreshTestLockStatus();
+
+      if (!serverTestLockActive && !localTestLockPending) {
+        setFullscreenLock(false);
+      }
+
       return;
     }
 
     await document.documentElement.requestFullscreen();
-    setFullscreenLock(false);
+    await refreshTestLockStatus();
+
+    if (!serverTestLockActive && !localTestLockPending) {
+      setFullscreenLock(false);
+    }
   } catch (error) {
     setFullscreenLock(true);
     logTestEvent("fullscreen_refused", "Browserul nu a permis fullscreen.");
@@ -668,6 +812,10 @@ function showSubjects() {
 async function loadStudentExams(options = {}) {
   const silent = options.silent === true;
 
+  if (silent && document.activeElement?.matches("[data-exam-row-select]")) {
+    return;
+  }
+
   if (!silent && !studentExamsLoaded) {
     subjectsList.innerHTML = "<p>Se incarca...</p>";
   }
@@ -718,17 +866,35 @@ async function loadStudentResults(options = {}) {
 ----------------------------
 Incarca varianta asignata studentului si porneste modul de rezolvare a testului.
 */
-async function openTest(examId) {
+async function openTest(examId, rowNumber = null) {
   solveTestMessage.textContent = "";
   solveTestForm.innerHTML = "<p>Se incarca testul...</p>";
   showSubjectSubsection("solveTestPanel");
   isSubmittingTest = false;
-  await enterTestFullscreen();
+  serverTestLockActive = false;
+  localTestLockPending = false;
+  setFullscreenLock(false);
 
   try {
+    const exam = studentExams.find((item) => String(item.id) === String(examId));
+    const assignedRow = Number(exam?.assigned_row_number);
+    const chosenRow = Number(rowNumber);
+
+    if (!Number.isInteger(chosenRow)) {
+      throw new Error("Alege randul inainte sa pornesti examenul.");
+    }
+
+    if (!Number.isInteger(assignedRow) || assignedRow !== chosenRow) {
+      await apiRequest(`/student/exams/${examId}/row`, {
+        method: "POST",
+        body: JSON.stringify({ rowNumber: chosenRow }),
+      });
+    }
+
     const data = await apiRequest(`/student/exams/${examId}/test`);
     activeTest = data;
     renderTestForm(data);
+    await enterTestFullscreen();
     if ((data.draftAnswers || []).length) {
       solveTestMessage.textContent = "Am incarcat raspunsurile salvate anterior.";
       solveTestMessage.className = "message form-message success";
@@ -757,7 +923,37 @@ activeExamsList.addEventListener("click", (event) => {
     return;
   }
 
-  openTest(button.dataset.startTest);
+  if (button.disabled) {
+    return;
+  }
+
+  const rowSelect = activeExamsList.querySelector(`[data-exam-row-select="${button.dataset.startTest}"]`);
+  button.disabled = true;
+  openTest(button.dataset.startTest, rowSelect?.value || null).finally(() => {
+    if (!activeTest) {
+      button.disabled = !rowSelect?.value;
+    }
+  });
+});
+
+activeExamsList.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-exam-row-select]");
+
+  if (!select) {
+    return;
+  }
+
+  if (select.value) {
+    selectedRowsByExam.set(String(select.dataset.examRowSelect), select.value);
+  } else {
+    selectedRowsByExam.delete(String(select.dataset.examRowSelect));
+  }
+
+  const button = activeExamsList.querySelector(`[data-start-test="${select.dataset.examRowSelect}"]`);
+
+  if (button) {
+    button.disabled = !select.value;
+  }
 });
 
 solveTestForm.addEventListener("click", (event) => {
@@ -813,6 +1009,7 @@ solveTestForm.addEventListener("submit", async (event) => {
   }
 
   clearTimeout(autosaveTimer);
+  localTestLockPending = false;
   await autosaveCurrentAnswers();
 
   const {
@@ -844,6 +1041,8 @@ solveTestForm.addEventListener("submit", async (event) => {
     solveTestMessage.className = "message form-message success";
     await Promise.all([loadStudentExams({ silent: true }), loadStudentResults({ silent: true })]);
     activeTest = null;
+    serverTestLockActive = false;
+    localTestLockPending = false;
     await exitTestFullscreen();
     isSubmittingTest = false;
     showSubjectSubsection("subjectExamsPanel");
@@ -863,6 +1062,7 @@ setInterval(() => {
   apiRequest("/student/heartbeat", { method: "POST" }).catch(() => {});
   loadStudentExams({ silent: true });
   loadStudentResults({ silent: true });
+  refreshTestLockStatus();
 }, 3000);
 
 document.addEventListener("keydown", (event) => {
@@ -870,16 +1070,23 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "Escape" || event.altKey) {
+  if (event.key === "Escape" || event.altKey || (event.key === "Tab" && event.altKey)) {
     event.preventDefault();
     event.stopPropagation();
+    activateTestLock();
+
+    if (event.altKey && event.key === "Tab") {
+      logTestEvent("alt_tab", "Studentul a incercat sa schimbe fereastra cu Alt+Tab.");
+      return;
+    }
+
     logTestEvent("blocked_key", event.key === "Escape" ? "Escape" : "Alt");
   }
 }, true);
 
 document.addEventListener("fullscreenchange", () => {
   if (activeTest && !document.fullscreenElement && !isSubmittingTest) {
-    setFullscreenLock(true);
+    activateTestLock();
     logTestEvent("fullscreen_exit", "Studentul a iesit din fullscreen.");
     return;
   }
@@ -889,12 +1096,14 @@ document.addEventListener("fullscreenchange", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (activeTest && document.visibilityState === "hidden") {
+    activateTestLock();
     logTestEvent("tab_hidden", "Pagina testului nu mai este vizibila.");
   }
 });
 
 window.addEventListener("blur", () => {
-  if (activeTest) {
+  if (activeTest && !isSubmittingTest) {
+    activateTestLock();
     logTestEvent("window_blur", "Fereastra testului a pierdut focusul.");
   }
 });
@@ -923,10 +1132,5 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
-if (returnFullscreenButton) {
-  returnFullscreenButton.addEventListener("click", () => {
-    enterTestFullscreen();
-  });
-}
 
 setInterval(enforceFullscreenLock, 700);
