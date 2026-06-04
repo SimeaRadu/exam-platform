@@ -7,7 +7,7 @@ Se stabileste adresa API-ului in functie de rulare locala sau servire din browse
 const API_BASE_URL = window.EXAM_PLATFORM_API_BASE_URL
   || (["localhost", "127.0.0.1"].includes(window.location.hostname) || window.location.protocol === "file:"
     ? "http://localhost:5000/api"
-    : "/api");
+    : "https://exam-platform-sql-radu-beagg2gfe5dqhddx.francecentral-01.azurewebsites.net/api");
 const API_FILE_BASE_URL = API_BASE_URL.replace(/\/api$/, "");
 
 /*
