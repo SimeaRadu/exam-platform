@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Profesor | Exam Platform</title>
-  <link rel="stylesheet" href="css/style.css?v=20260605-2">
+  <link rel="stylesheet" href="css/style.css?v=20260605-6">
 </head>
 <body>
   <!--
@@ -36,37 +36,37 @@
 
       <div class="admin-menu-grid">
         <button class="admin-menu-card" type="button" data-open-section="usersSection">
-          <span class="menu-card-icon">U</span>
+          <span class="menu-card-icon" data-menu-icon="users" aria-hidden="true"></span>
           <strong>Utilizatori</strong>
           <span>Adauga studenti, profesori si sterge conturi gresite.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="subjectsSection" data-admin-only-menu>
-          <span class="menu-card-icon">M</span>
+          <span class="menu-card-icon" data-menu-icon="book" aria-hidden="true"></span>
           <strong>Materii</strong>
           <span>Creeaza materii si asigneaza profesorii responsabili.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="examsSection">
-          <span class="menu-card-icon">E</span>
+          <span class="menu-card-icon" data-menu-icon="clipboard" aria-hidden="true"></span>
           <strong>Examene</strong>
           <span>Creeaza examene, vezi examene viitoare si porneste testele.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="archiveSection">
-          <span class="menu-card-icon">A</span>
+          <span class="menu-card-icon" data-menu-icon="archive" aria-hidden="true"></span>
           <strong>Arhiva</strong>
           <span>Vezi examenele arhivate, grupate pe materii.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="subjectInfoSection">
-          <span class="menu-card-icon">I</span>
+          <span class="menu-card-icon" data-menu-icon="megaphone" aria-hidden="true"></span>
           <strong>Informatii materie</strong>
           <span>Publica mesaje si anunturi vizibile studentilor.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="resultsSection">
-          <span class="menu-card-icon">N</span>
+          <span class="menu-card-icon" data-menu-icon="chart" aria-hidden="true"></span>
           <strong>Rezultate</strong>
           <span>Consulta notele si raspunsurile studentilor.</span>
         </button>
@@ -772,6 +772,6 @@ CORECT: 1</pre>
 
   <!-- Scripturile pentru API si dashboard profesor/admin. -->
   <script src="js/api.js?v=20260512-3"></script>
-  <script src="js/admin-dashboard.js?v=20260605-1"></script>
+  <script src="js/admin-dashboard.js?v=20260605-3"></script>
 </body>
 </html>

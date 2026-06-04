@@ -623,6 +623,7 @@ body.test-fullscreen-locked .test-form {
 .admin-menu-card {
   min-height: 170px;
   display: grid;
+  justify-items: center;
   align-content: start;
   gap: 10px;
   border: 1px solid var(--line);
@@ -630,7 +631,7 @@ body.test-fullscreen-locked .test-form {
   padding: 18px;
   background: var(--panel-strong);
   color: var(--text);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
   box-shadow: 0 12px 32px rgba(0, 8, 22, 0.18);
   backdrop-filter: blur(10px);
@@ -652,14 +653,78 @@ body.test-fullscreen-locked .test-form {
 }
 
 .menu-card-icon {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: rgba(87, 212, 232, 0.16);
-  color: #dff8ff;
+  --icon-accent: #57d4e8;
+  --icon-accent-rgb: 87, 212, 232;
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  border: 1px solid rgba(var(--icon-accent-rgb), 0.48);
+  border-radius: 10px;
+  background: rgba(var(--icon-accent-rgb), 0.18);
+  color: var(--icon-accent);
+  font-size: 0;
   font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.menu-card-icon[data-menu-icon="users"],
+.menu-card-icon[data-menu-icon="user"] {
+  --icon-accent: #7dd3fc;
+  --icon-accent-rgb: 125, 211, 252;
+}
+
+.menu-card-icon[data-menu-icon="book"],
+.menu-card-icon[data-menu-icon="graduation"] {
+  --icon-accent: #facc15;
+  --icon-accent-rgb: 250, 204, 21;
+}
+
+.menu-card-icon[data-menu-icon="clipboard"],
+.menu-card-icon[data-menu-icon="file"] {
+  --icon-accent: #a78bfa;
+  --icon-accent-rgb: 167, 139, 250;
+}
+
+.menu-card-icon[data-menu-icon="calendar"] {
+  --icon-accent: #fb923c;
+  --icon-accent-rgb: 251, 146, 60;
+}
+
+.menu-card-icon[data-menu-icon="chart"] {
+  --icon-accent: #34d399;
+  --icon-accent-rgb: 52, 211, 153;
+}
+
+.menu-card-icon[data-menu-icon="megaphone"] {
+  --icon-accent: #f472b6;
+  --icon-accent-rgb: 244, 114, 182;
+}
+
+.menu-card-icon[data-menu-icon="check"] {
+  --icon-accent: #22c55e;
+  --icon-accent-rgb: 34, 197, 94;
+}
+
+.menu-card-icon[data-menu-icon="archive"] {
+  --icon-accent: #94a3b8;
+  --icon-accent-rgb: 148, 163, 184;
+}
+
+.menu-card-icon[data-menu-icon="info"] {
+  --icon-accent: #38bdf8;
+  --icon-accent-rgb: 56, 189, 248;
+}
+
+.menu-card-icon svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+  fill: currentColor;
 }
 
 .section-heading {

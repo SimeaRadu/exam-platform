@@ -199,6 +199,32 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+const menuIconPaths = {
+  archive: "M4 4h16v4H4V4Zm2 6h12v10H6V10Zm4 3v2h4v-2h-4Z",
+  book: "M5 3h12a2 2 0 0 1 2 2v15H7a3 3 0 0 1-3-3V5a2 2 0 0 1 1-2Zm2 2v10.2A3 3 0 0 1 7 15h10V5H7Zm0 12a1 1 0 0 0 0 2h10v-2H7Z",
+  calendar: "M7 2h2v3h6V2h2v3h3a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3V2Zm13 8H4v10h16V10ZM6 12h4v4H6v-4Z",
+  chart: "M4 19h16v2H2V3h2v16Zm3-2V9h3v8H7Zm5 0V5h3v12h-3Zm5 0v-6h3v6h-3Z",
+  check: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm5.6 12.2L17.7 8l-1.8-1.7-5.3 5.4-2.5-2.5-1.8 1.8 4.3 4.2Z",
+  clipboard: "M9 2h6a2 2 0 0 1 2 2h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2-2Zm0 4h6V4H9v2Zm-2 6h10v-2H7v2Zm0 4h7v-2H7v2Z",
+  file: "M6 2h8l5 5v15H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V8h4.5L13 3.5ZM8 12h8v-2H8v2Zm0 4h8v-2H8v2Zm0 4h5v-2H8v2Z",
+  graduation: "M12 3 1 9l11 6 9-4.9V17h2V9L12 3Zm-6 9.2V16c0 2.2 2.7 4 6 4s6-1.8 6-4v-3.8l-6 3.3-6-3.3Z",
+  info: "M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm1 8h-2v7h2v-7Zm0-4h-2v2h2V6Z",
+  megaphone: "M3 10v4h3l4 5h3l-3.2-5H11l8 4V6l-8 4H3Zm17-3.6v11.2a4 4 0 0 0 0-11.2Z",
+  user: "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm-9 9a9 9 0 0 1 18 0H3Z",
+  users: "M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 0a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2 21a6 6 0 0 1 12 0H2Zm12.5 0a8 8 0 0 0-2-5.3A5.5 5.5 0 0 1 22 19.5V21h-7.5Z",
+};
+
+function renderMenuIcon(iconName) {
+  const path = menuIconPaths[iconName] || menuIconPaths.book;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${path}"></path></svg>`;
+}
+
+function hydrateMenuIcons(root = document) {
+  root.querySelectorAll(".menu-card-icon[data-menu-icon]").forEach((icon) => {
+    icon.innerHTML = renderMenuIcon(icon.dataset.menuIcon);
+  });
+}
+
 function updateRoleFields() {
   const isProfessor = roleSelect.value === "professor";
 
@@ -1985,6 +2011,7 @@ rtfImportForm.addEventListener("submit", async (event) => {
 
 updateRoleFields();
 updateUserManagementVisibility();
+hydrateMenuIcons();
 showAdminMenu();
 setInterval(() => {
   if (activeSectionId === "usersSection") {

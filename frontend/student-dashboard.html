@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Student | Exam Platform</title>
-  <link rel="stylesheet" href="css/style.css?v=20260605-2">
+  <link rel="stylesheet" href="css/style.css?v=20260605-6">
 </head>
 <body>
   <!--
@@ -36,43 +36,43 @@
 
       <div class="admin-menu-grid">
         <button class="admin-menu-card" type="button" data-student-main-section="studentSubjectsSection">
-          <span class="menu-card-icon">M</span>
+          <span class="menu-card-icon" data-menu-icon="book" aria-hidden="true"></span>
           <strong>Materiile mele</strong>
           <span>Alege materia pentru examene, note si informatii.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentCalendarSection">
-          <span class="menu-card-icon">C</span>
+          <span class="menu-card-icon" data-menu-icon="calendar" aria-hidden="true"></span>
           <strong>Calendar examene</strong>
           <span>Examene viitoare si active, in ordine cronologica.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentHistorySection">
-          <span class="menu-card-icon">N</span>
+          <span class="menu-card-icon" data-menu-icon="chart" aria-hidden="true"></span>
           <strong>Catalog</strong>
           <span>Toate rezultatele tale, pe materii.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentAnnouncementsSection">
-          <span class="menu-card-icon">A</span>
+          <span class="menu-card-icon" data-menu-icon="megaphone" aria-hidden="true"></span>
           <strong>Anunturi</strong>
           <span>Informatii publicate de profesori.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentProfileSection">
-          <span class="menu-card-icon">P</span>
+          <span class="menu-card-icon" data-menu-icon="user" aria-hidden="true"></span>
           <strong>Profil student</strong>
           <span>Datele contului tau.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentStatusSection">
-          <span class="menu-card-icon">S</span>
+          <span class="menu-card-icon" data-menu-icon="check" aria-hidden="true"></span>
           <strong>Examene Finalizate</strong>
           <span>Examene terminate si arhivate.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-student-main-section="studentRulesSection">
-          <span class="menu-card-icon">R</span>
+          <span class="menu-card-icon" data-menu-icon="file" aria-hidden="true"></span>
           <strong>Reguli examen</strong>
           <span>Reguli afisate inainte de test.</span>
         </button>
@@ -221,19 +221,19 @@
       <section class="panel">
         <div class="admin-menu-grid">
           <button class="admin-menu-card" type="button" data-student-subsection="subjectExamsPanel">
-            <span class="menu-card-icon">E</span>
+            <span class="menu-card-icon" data-menu-icon="clipboard" aria-hidden="true"></span>
             <strong>Examene</strong>
             <span>Vezi examene programate, incepute si terminate.</span>
           </button>
 
           <button class="admin-menu-card" type="button" data-student-subsection="subjectGradesPanel">
-            <span class="menu-card-icon">N</span>
+            <span class="menu-card-icon" data-menu-icon="graduation" aria-hidden="true"></span>
             <strong>Note</strong>
             <span>Vezi rezultatele obtinute la examenele finalizate.</span>
           </button>
 
           <button class="admin-menu-card" type="button" data-student-subsection="subjectInfoPanel">
-            <span class="menu-card-icon">I</span>
+            <span class="menu-card-icon" data-menu-icon="info" aria-hidden="true"></span>
             <strong>Informatii</strong>
             <span>Detalii despre materia selectata.</span>
           </button>
@@ -313,6 +313,6 @@
 
   <!-- Scripturile pentru API si dashboard student. -->
   <script src="js/api.js?v=20260601-1"></script>
-  <script src="js/student-dashboard.js?v=20260605-6"></script>
+  <script src="js/student-dashboard.js?v=20260605-8"></script>
 </body>
 </html>
