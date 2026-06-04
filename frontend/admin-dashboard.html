@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Profesor | Exam Platform</title>
+  <link rel="stylesheet" href="css/style.css?v=20260512-3">
+</head>
+<body>
+  <!--
+  ----------------------------
+              Header profesor
+  ----------------------------
+  Afiseaza profesorul/adminul autentificat si permite iesirea din cont.
+  -->
+  <header class="topbar">
+    <div>
+      <h1>Dashboard profesor</h1>
+      <p id="professorName">Meniu principal</p>
+    </div>
+    <button id="logoutButton" class="ghost-button" type="button">Logout</button>
+  </header>
+
+  <main class="dashboard-layout">
+    <!--
+    ----------------------------
+               Meniu admin
+    ----------------------------
+    Meniul principal deschide modulele disponibile in functie de rol si permisiuni.
+    -->
+    <section id="adminMenuSection" class="panel">
+      <div class="section-heading">
+        <h2>Meniu admin</h2>
+        <p>Alege ce vrei sa administrezi.</p>
+      </div>
+
+      <div class="admin-menu-grid">
+        <button class="admin-menu-card" type="button" data-open-section="usersSection">
+          <span class="menu-card-icon">U</span>
+          <strong>Utilizatori</strong>
+          <span>Adauga studenti, profesori si sterge conturi gresite.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-open-section="subjectsSection" data-admin-only-menu>
+          <span class="menu-card-icon">M</span>
+          <strong>Materii</strong>
+          <span>Creeaza materii si asigneaza profesorii responsabili.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-open-section="examsSection">
+          <span class="menu-card-icon">E</span>
+          <strong>Examene</strong>
+          <span>Creeaza examene, vezi examene viitoare si porneste testele.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-open-section="archiveSection">
+          <span class="menu-card-icon">A</span>
+          <strong>Arhiva</strong>
+          <span>Vezi examenele arhivate, grupate pe materii.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-open-section="subjectInfoSection">
+          <span class="menu-card-icon">I</span>
+          <strong>Informatii materie</strong>
+          <span>Publica mesaje si anunturi vizibile studentilor.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-open-section="resultsSection">
+          <span class="menu-card-icon">N</span>
+          <strong>Rezultate</strong>
+          <span>Consulta notele si raspunsurile studentilor.</span>
+        </button>
+      </div>
+    </section>
+
+    <!--
+    ----------------------------
+              Utilizatori
+    ----------------------------
+    Administreaza conturi, import Excel si lista studentilor grupati pe grupe.
+    -->
+    <section id="usersSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Administrare utilizatori</h2>
+            <p>Studentii intra cu numele complet si codul unic.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+      <div id="createUserPanel">
+      <div class="section-heading">
+        <h2>Adauga utilizator</h2>
+        <p>Studentii vor intra cu numele complet si codul unic.</p>
+      </div>
+
+      <form id="createUserForm" class="form-grid">
+        <div>
+          <label for="fullName">Nume complet</label>
+          <input id="fullName" name="fullName" type="text" required>
+        </div>
+
+        <div>
+          <label for="role">Rol</label>
+          <select id="role" name="role">
+            <option value="student">Student</option>
+            <option value="professor">Profesor</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="uniqueCode">Cod unic / parola</label>
+          <div class="choice-row">
+            <label class="inline-choice">
+              <input type="radio" name="uniqueCodeMode" value="manual" checked>
+              Manual
+            </label>
+            <label class="inline-choice">
+              <input type="radio" name="uniqueCodeMode" value="auto">
+              Genereaza automat
+            </label>
+          </div>
+          <div class="input-with-action">
+            <input id="uniqueCode" name="uniqueCode" type="password" required>
+            <button class="icon-button password-toggle" type="button" data-toggle-password="uniqueCode" aria-label="Arata codul unic">
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label for="matriculationNumber">Grupa</label>
+          <input id="matriculationNumber" name="matriculationNumber" type="text">
+        </div>
+
+        <div id="emailField">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email">
+        </div>
+
+        <div id="passwordField" class="hidden">
+          <label for="password">Parola profesor</label>
+          <div class="input-with-action">
+            <input id="password" name="password" type="password">
+            <button class="icon-button password-toggle" type="button" data-toggle-password="password" aria-label="Arata parola profesorului">
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <button class="primary-button form-action" type="submit">Salveaza utilizator</button>
+        <p id="createUserMessage" class="message form-message" aria-live="polite"></p>
+      </form>
+      </div>
+      <div id="readonlyUsersNotice" class="hidden">
+        <div class="section-heading">
+          <h2>Lista studenti</h2>
+          <p>Ai acces la lista studentilor, dar doar adminul principal poate crea sau sterge utilizatori.</p>
+        </div>
+      </div>
+      </section>
+
+      <section id="importUsersPanel" class="panel">
+        <div class="section-heading">
+          <h2>Import studenti din Excel</h2>
+          <p>Incarca un fisier .xlsx cu nume student, grupa si cod. Codul devine parola studentului.</p>
+        </div>
+
+        <form id="importUsersForm" class="form-grid compact-form">
+          <div>
+            <label for="studentsFile">Fisier Excel</label>
+            <input id="studentsFile" name="studentsFile" type="file" accept=".xlsx,.xls" required>
+          </div>
+
+          <button class="primary-button form-action" type="submit">Importa studentii</button>
+          <p id="importUsersMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Utilizatori</h2>
+          <p>Lista conturilor introduse in baza de date.</p>
+        </div>
+        <button id="refreshUsersButton" class="secondary-button" type="button">Refresh</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nume</th>
+              <th>Rol</th>
+              <th>Email</th>
+              <th>Grupa</th>
+              <th data-admin-only-column>Cod unic</th>
+              <th data-admin-only-column>Actiuni</th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody">
+            <tr>
+              <td colspan="6">Se incarca...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+                Materii
+    ----------------------------
+    Adminul creeaza materii si le asigneaza profesorilor responsabili.
+    -->
+    <section id="subjectsSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Materii</h2>
+            <p>Creeaza materii si gestioneaza profesorii responsabili.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div id="subjectAdminPanel">
+        <div class="section-heading">
+          <h2>Adauga materie</h2>
+          <p>Doar adminul principal poate crea sau sterge materii.</p>
+        </div>
+
+        <form id="createSubjectForm" class="form-grid compact-form">
+          <div>
+            <label for="subjectName">Nume materie</label>
+            <input id="subjectName" name="subjectName" type="text" required>
+          </div>
+          <div>
+            <label for="subjectProfessor">Profesor</label>
+            <select id="subjectProfessor" name="subjectProfessor">
+              <option value="">Fara profesor asignat</option>
+            </select>
+          </div>
+
+          <button class="primary-button form-action" type="submit">Salveaza materie</button>
+          <p id="createSubjectMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+        </div>
+        <div id="subjectReadonlyNotice" class="hidden">
+          <div class="section-heading">
+            <h2>Materii</h2>
+            <p>Doar adminul principal poate crea sau sterge materii.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Lista materii</h2>
+          <p>Materiile disponibile pentru examene si profesorul asignat.</p>
+        </div>
+        <div id="subjectsList" class="subject-list"></div>
+      </section>
+
+      <section id="subjectAssignmentPanel" class="panel">
+        <div class="section-heading">
+          <h2>Asignare materii</h2>
+          <p>Alege materia si profesorul care o administreaza.</p>
+        </div>
+
+        <form id="assignSubjectForm" class="form-grid compact-form">
+          <div>
+            <label for="assignSubject">Materie</label>
+            <select id="assignSubject" name="assignSubject" required>
+              <option value="">Alege materia</option>
+            </select>
+          </div>
+          <div>
+            <label for="assignProfessor">Profesor</label>
+            <select id="assignProfessor" name="assignProfessor" required>
+              <option value="">Alege profesorul</option>
+            </select>
+          </div>
+          <button class="primary-button form-action" type="submit">Asigneaza materia</button>
+          <button id="clearSubjectAssignmentButton" class="secondary-button form-action" type="button">Scoate asignarea</button>
+          <p id="assignSubjectMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+    </section>
+
+    <!--
+    ----------------------------
+          Informatii materie
+    ----------------------------
+    Profesorii si adminul publica mesaje si reguli pentru materiile pe care le gestioneaza.
+    -->
+    <section id="subjectInfoSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Informatii materie</h2>
+            <p>Mesaje vizibile studentilor la materia selectata.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Editeaza informatii</h2>
+          <p>Profesorii pot edita doar materiile asignate lor.</p>
+        </div>
+
+        <form id="subjectInfoForm" class="form-grid">
+          <div>
+            <label for="infoSubject">Materie</label>
+            <select id="infoSubject" name="infoSubject" required>
+              <option value="">Alege materia</option>
+            </select>
+          </div>
+          <div class="full-row">
+            <label for="subjectInfo">Mesaj informativ</label>
+            <textarea id="subjectInfo" name="subjectInfo" rows="5" placeholder="Ex: Programul sesiunii, reguli pentru examen, anunturi importante..."></textarea>
+          </div>
+          <div class="full-row">
+            <label for="subjectRules">Reguli examen</label>
+            <textarea id="subjectRules" name="subjectRules" rows="5" placeholder="Ex: Nu parasiti pagina testului. Dupa trimitere raspunsurile nu mai pot fi modificate."></textarea>
+          </div>
+          <button class="primary-button form-action" type="submit">Salveaza informatiile</button>
+          <p id="subjectInfoMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+                Examene
+    ----------------------------
+    Creeaza examene, controleaza statusul lor si deschide asignarile sau variantele.
+    -->
+    <section id="examsSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Examene</h2>
+            <p>Creeaza examene si controleaza statusul lor.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Creeaza examen</h2>
+          <p>Examenele noi pornesc cu status viitor.</p>
+        </div>
+
+        <form id="createExamForm" class="form-grid">
+          <div>
+            <label for="examSubject">Materie</label>
+            <select id="examSubject" name="examSubject" required>
+              <option value="">Alege materia</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="examTitle">Nume examen</label>
+            <input id="examTitle" name="examTitle" type="text" required>
+          </div>
+
+          <div>
+            <label for="examDate">Data examen</label>
+            <input id="examDate" name="examDate" type="datetime-local" required>
+          </div>
+          <div>
+            <label for="bonusPoints">Puncte din oficiu</label>
+            <input id="bonusPoints" name="bonusPoints" type="number" min="0" step="0.25" value="0" required>
+          </div>
+
+          <button class="primary-button form-action" type="submit">Salveaza examen</button>
+          <p id="createExamMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Lista examene</h2>
+            <p>Examene viitoare, active sau finalizate, ordonate dupa data.</p>
+          </div>
+          <button id="refreshExamsButton" class="secondary-button" type="button">Refresh</button>
+        </div>
+
+        <div class="filter-row" aria-label="Filtru examene">
+          <button class="filter-button active" type="button" data-exam-filter="all">Toate</button>
+          <button class="filter-button" type="button" data-exam-filter="future">Viitor</button>
+          <button class="filter-button" type="button" data-exam-filter="active">Active</button>
+          <button class="filter-button" type="button" data-exam-filter="finished">Terminate</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Materie</th>
+                <th>Examen</th>
+                <th>Data</th>
+                <th>Status</th>
+                <th>Actiuni</th>
+              </tr>
+            </thead>
+            <tbody id="examsTableBody">
+              <tr>
+                <td colspan="5">Se incarca...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="assignmentsPanel" class="panel hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="assignmentsPanelTitle">Asignare variante</h2>
+            <p id="assignmentsPanelDescription">Alege ce varianta primeste fiecare student la examenul selectat.</p>
+          </div>
+          <button id="closeAssignmentsPanelButton" class="secondary-button" type="button">Inchide</button>
+        </div>
+
+        <div class="action-row assignment-toolbar">
+          <button id="randomAssignmentsButton" class="secondary-button" type="button">Asignare random</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Email</th>
+                <th>Grupa</th>
+                <th>Varianta</th>
+              </tr>
+            </thead>
+            <tbody id="assignmentsTableBody">
+              <tr>
+                <td colspan="4">Alege un examen.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p id="assignmentsMessage" class="message form-message" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+          Variante din RTF
+    ----------------------------
+    Variantele de test se importa din fisiere RTF si se pot verifica pe fiecare examen.
+    -->
+    <section id="variantsSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Variante</h2>
+            <p>Gestioneaza variantele si intrebarile pentru fiecare examen.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section id="variantsPanel" class="panel hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="variantsPanelTitle">Variante si intrebari</h2>
+            <p>Importa variante RTF pentru examenul selectat.</p>
+          </div>
+          <button id="closeVariantsPanelButton" class="secondary-button" type="button">Inchide examenul</button>
+        </div>
+
+        <form id="variantRtfImportForm" class="form-grid compact-form">
+          <div>
+            <label for="variantRtfFile">Varianta RTF</label>
+            <input id="variantRtfFile" name="variantRtfFile" type="file" accept=".rtf" required>
+          </div>
+          <div>
+            <label for="variantRtfRowNumber">Rand</label>
+            <input id="variantRtfRowNumber" name="variantRtfRowNumber" type="number" min="1" required>
+          </div>
+          <button class="primary-button form-action" type="submit">Importa varianta RTF</button>
+          <p id="variantRtfImportMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+
+        <hr class="panel-divider hidden">
+
+        <form id="createVariantForm" class="form-grid compact-form hidden">
+          <div>
+            <label for="variantName">Nume varianta</label>
+            <input id="variantName" name="variantName" type="text" required>
+          </div>
+          <div>
+            <label for="rowNumber">Rand</label>
+            <input id="rowNumber" name="rowNumber" type="number" min="1">
+          </div>
+          <button class="primary-button form-action" type="submit">Salveaza varianta</button>
+          <p id="createVariantMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+
+        <hr class="panel-divider hidden">
+
+        <form id="createQuestionForm" class="form-grid hidden">
+          <div>
+            <label for="questionVariant">Varianta</label>
+            <select id="questionVariant" name="questionVariant" required>
+              <option value="">Alege varianta</option>
+            </select>
+          </div>
+          <div>
+            <label for="questionPoints">Punctaj</label>
+            <input id="questionPoints" name="questionPoints" type="number" min="0.25" step="0.25" value="1" required>
+          </div>
+          <div class="full-row">
+            <label for="questionText">Intrebare</label>
+            <input id="questionText" name="questionText" type="text" required>
+          </div>
+          <div class="full-row">
+            <label for="questionImage">Imagine intrebare</label>
+            <input id="questionImage" name="questionImage" type="file" accept="image/*">
+          </div>
+          <div>
+            <label for="answer1">Raspuns 1</label>
+            <input id="answer1" name="answer1" type="text" required>
+          </div>
+          <div>
+            <label for="answer2">Raspuns 2</label>
+            <input id="answer2" name="answer2" type="text" required>
+          </div>
+          <div>
+            <label for="answer3">Raspuns 3</label>
+            <input id="answer3" name="answer3" type="text">
+          </div>
+          <div>
+            <label for="answer4">Raspuns 4</label>
+            <input id="answer4" name="answer4" type="text">
+          </div>
+          <fieldset class="correct-answer-grid full-row">
+            <legend>Raspunsuri corecte</legend>
+            <label class="check-card">
+              <input type="checkbox" name="correctAnswerIndexes" value="0">
+              <span class="check-mark" aria-hidden="true">*</span>
+              <span>Raspuns 1</span>
+            </label>
+            <label class="check-card">
+              <input type="checkbox" name="correctAnswerIndexes" value="1">
+              <span class="check-mark" aria-hidden="true">*</span>
+              <span>Raspuns 2</span>
+            </label>
+            <label class="check-card">
+              <input type="checkbox" name="correctAnswerIndexes" value="2">
+              <span class="check-mark" aria-hidden="true">*</span>
+              <span>Raspuns 3</span>
+            </label>
+            <label class="check-card">
+              <input type="checkbox" name="correctAnswerIndexes" value="3">
+              <span class="check-mark" aria-hidden="true">*</span>
+              <span>Raspuns 4</span>
+            </label>
+          </fieldset>
+          <button class="primary-button form-action" type="submit">Salveaza intrebarea</button>
+          <p id="createQuestionMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+
+        <div id="variantsList" class="variant-list"></div>
+      </section>
+
+      <section id="variantsEmptyPanel" class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Alege un examen</h2>
+            <p>Deschide variantele pentru examenul pe care vrei sa il editezi.</p>
+          </div>
+          <button id="refreshVariantExamsButton" class="secondary-button" type="button">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Materie</th>
+                <th>Examen</th>
+                <th>Data</th>
+                <th>Status</th>
+                <th>Actiuni</th>
+              </tr>
+            </thead>
+            <tbody id="variantExamsTableBody">
+              <tr>
+                <td colspan="5">Se incarca...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+                Arhiva
+    ----------------------------
+    Pastreaza examenele arhivate pe materii si permite exportul registrului in Excel.
+    -->
+    <section id="archiveSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Arhiva</h2>
+            <p>Examene arhivate, grupate pe materii.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Examene arhivate</h2>
+            <p>Descarca registrul individual pentru fiecare examen.</p>
+          </div>
+          <button id="refreshArchiveButton" class="secondary-button" type="button">Refresh</button>
+        </div>
+        <div id="archiveList" class="variant-list"></div>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+           Import RTF vechi
+    ----------------------------
+    Sectiune veche pastrata temporar pentru compatibilitate cu importurile anterioare.
+    -->
+    <section id="rtfSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Import RTF</h2>
+            <p>Incarca un fisier RTF si creeaza automat variante, intrebari si raspunsuri.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Incarca test RTF</h2>
+          <p>Format recomandat: VARIANTA, RAND, INTREBARE, PUNCTAJ, RASPUNS, CORECT.</p>
+        </div>
+
+        <form id="rtfImportForm" class="form-grid">
+          <div>
+            <label for="rtfExam">Examen</label>
+            <select id="rtfExam" name="rtfExam" required>
+              <option value="">Alege examenul</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="rtfFile">Fisier RTF</label>
+            <input id="rtfFile" name="rtfFile" type="file" accept=".rtf" required>
+          </div>
+
+          <button class="primary-button form-action" type="submit">Importa RTF</button>
+          <p id="rtfImportMessage" class="message form-message" aria-live="polite"></p>
+        </form>
+
+        <div class="format-box">
+          <strong>Exemplu continut RTF:</strong>
+          <pre>VARIANTA: Varianta 1
+RAND: 1
+INTREBARE: Ce este Node.js?
+PUNCTAJ: 1
+RASPUNS: Runtime JavaScript
+RASPUNS: Baza de date
+RASPUNS: Sistem de operare
+CORECT: 1</pre>
+        </div>
+      </section>
+    </section>
+
+    <!--
+    ----------------------------
+               Rezultate
+    ----------------------------
+    Rezultatele sunt grupate pe examene, apoi se pot deschide detaliile fiecarui student.
+    -->
+    <section id="resultsSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Rezultate</h2>
+            <p>Aici vom afisa notele studentilor dupa trimiterea testelor.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Examene cu rezultate</h2>
+            <p>Intra pe un examen ca sa vezi studentii si notele.</p>
+          </div>
+          <button id="refreshResultsButton" class="secondary-button" type="button">Refresh</button>
+        </div>
+
+        <div id="resultsExamList" class="variant-list"></div>
+      </section>
+
+      <section id="examResultsPanel" class="panel hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="examResultsTitle">Rezultate studenti</h2>
+            <p id="examResultsMeta">Notele salvate dupa trimiterea testelor.</p>
+          </div>
+          <button id="backToResultExamsButton" class="secondary-button" type="button">Inapoi la examene</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Materie</th>
+                <th>Examen</th>
+                <th>Punctaj</th>
+                <th>Nota</th>
+                <th>Trimis la</th>
+                <th>Actiuni</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTableBody">
+              <tr>
+                <td colspan="7">Se incarca...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="resultDetailsPanel" class="panel hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="resultDetailsTitle">Detalii rezultat</h2>
+            <p id="resultDetailsMeta">Raspunsurile studentului si raspunsurile corecte.</p>
+          </div>
+          <button id="closeResultDetailsButton" class="secondary-button" type="button">Inchide</button>
+        </div>
+        <div id="resultDetailsContent" class="variant-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <!-- Scripturile pentru API si dashboard profesor/admin. -->
+  <script src="js/api.js?v=20260512-3"></script>
+  <script src="js/admin-dashboard.js?v=20260512-3"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+.vercel
+
+# Date locale / parole
+.env
+backend/.env
+
+# Dependinte instalate local
+node_modules/
+backend/node_modules/
+
+# Fisiere generate local
+*.log
+npm-debug.log*
+
+# Upload-uri locale din teste
+backend/uploads/questions/*
+!backend/uploads/questions/.gitkeep

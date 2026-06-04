@@ -1,0 +1,932 @@
+/*
+----------------------------
+ Initializare dashboard student
+----------------------------
+Se citesc elementele din pagina si se pregatesc variabilele globale ale sesiunii studentului.
+*/
+const user = requireAuth("student");
+const studentName = document.getElementById("studentName");
+const logoutButton = document.getElementById("logoutButton");
+const refreshStudentExamsButton = document.getElementById("refreshStudentExamsButton");
+const studentQuickMenuSection = document.getElementById("studentQuickMenuSection");
+const studentSubjectsSection = document.getElementById("studentSubjectsSection");
+const studentSubjectMenuSection = document.getElementById("studentSubjectMenuSection");
+const subjectsList = document.getElementById("subjectsList");
+const selectedSubjectTitle = document.getElementById("selectedSubjectTitle");
+const backToSubjectsButton = document.getElementById("backToSubjectsButton");
+const futureExamsList = document.getElementById("futureExamsList");
+const activeExamsList = document.getElementById("activeExamsList");
+const finishedExamsList = document.getElementById("finishedExamsList");
+const subjectInfoText = document.getElementById("subjectInfoText");
+const refreshStudentResultsButton = document.getElementById("refreshStudentResultsButton");
+const studentResultsList = document.getElementById("studentResultsList");
+const solveTestForm = document.getElementById("solveTestForm");
+const solveTestTitle = document.getElementById("solveTestTitle");
+const solveTestMeta = document.getElementById("solveTestMeta");
+const solveTestMessage = document.getElementById("solveTestMessage");
+const studentCalendarList = document.getElementById("studentCalendarList");
+const studentHistoryList = document.getElementById("studentHistoryList");
+const studentAnnouncementsList = document.getElementById("studentAnnouncementsList");
+const studentProfileContent = document.getElementById("studentProfileContent");
+const studentStatusList = document.getElementById("studentStatusList");
+const studentRulesContent = document.getElementById("studentRulesContent");
+const fullscreenLockOverlay = document.getElementById("fullscreenLockOverlay");
+const returnFullscreenButton = document.getElementById("returnFullscreenButton");
+
+let studentExams = [];
+let studentSubjects = [];
+let studentResults = [];
+let selectedSubject = null;
+let selectedSubjectId = null;
+let studentExamsLoaded = false;
+let activeTest = null;
+let selectedAnswersByQuestion = new Map();
+let autosaveTimer = null;
+let lastEventLogAt = new Map();
+let isSubmittingTest = false;
+
+if (user) {
+  studentName.textContent = user.full_name || "Student";
+}
+
+logoutButton.addEventListener("click", () => {
+  apiRequest("/auth/logout", { method: "POST" }).catch(() => {}).finally(() => {
+    clearSession();
+    window.location.href = "login.html";
+  });
+});
+
+/*
+----------------------------
+      Functii utilitare
+----------------------------
+Functii refolosite pentru text sigur in HTML, formatare data si gruparea materiilor.
+*/
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatExamDate(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Date(value).toLocaleString("ro-RO", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function getStatusText(status) {
+  if (status === "future") {
+    return "Programat";
+  }
+
+  if (status === "active") {
+    return "Inceput";
+  }
+
+  return "Terminat";
+}
+
+function groupSubjects(subjects, exams) {
+  const subjectGroups = new Map();
+
+  subjects.forEach((subject) => {
+    subjectGroups.set(String(subject.id), {
+      id: subject.id,
+      name: subject.name || "Fara materie",
+      info: subject.info_text || "",
+      rules: subject.rules_text || "",
+      exams: [],
+    });
+  });
+
+  exams.forEach((exam) => {
+    const key = exam.subject_id ? String(exam.subject_id) : `name:${exam.subject_name}`;
+
+    if (!subjectGroups.has(key)) {
+      subjectGroups.set(key, {
+        id: exam.subject_id || key,
+        name: exam.subject_name || "Fara materie",
+        info: exam.subject_info || "",
+        rules: exam.subject_rules || "",
+        exams: [],
+      });
+    }
+
+    subjectGroups.get(key).exams.push(exam);
+  });
+
+  return [...subjectGroups.values()].sort((first, second) => first.name.localeCompare(second.name));
+}
+
+/*
+----------------------------
+          Materiile mele
+----------------------------
+Afiseaza materiile disponibile studentului si numara examenele pe status.
+*/
+function renderSubjects() {
+  const subjects = groupSubjects(studentSubjects, studentExams);
+
+  if (!subjects.length) {
+    subjectsList.innerHTML = "<p>Nu exista materii cu examene disponibile.</p>";
+    return;
+  }
+
+  subjectsList.innerHTML = subjects.map((subject) => {
+    const activeCount = subject.exams.filter((exam) => exam.status === "active").length;
+    const futureCount = subject.exams.filter((exam) => exam.status === "future").length;
+    const finishedCount = subject.exams.filter((exam) => exam.status === "finished" || exam.status === "archived").length;
+
+    return `
+      <button class="admin-menu-card" type="button" data-open-subject="${escapeHtml(subject.id)}">
+        <span class="menu-card-icon">M</span>
+        <strong>${escapeHtml(subject.name)}</strong>
+        <span>${futureCount} programate, ${activeCount} incepute, ${finishedCount} terminate</span>
+      </button>
+    `;
+  }).join("");
+}
+
+function renderExamList(container, exams, emptyText) {
+  if (!exams.length) {
+    container.innerHTML = `<p>${emptyText}</p>`;
+    return;
+  }
+
+  container.innerHTML = exams.map((exam) => `
+    <article class="exam-card">
+      <div>
+        <h3>${escapeHtml(exam.title)}</h3>
+        <div class="exam-card-meta">
+          <span>${formatExamDate(exam.exam_date)}</span>
+        </div>
+      </div>
+      <span class="status-badge status-${escapeHtml(exam.status)}">
+        ${getStatusText(exam.status)}
+      </span>
+      ${exam.status === "active" && !exam.has_result ? `
+        <button class="primary-button" type="button" data-start-test="${exam.id}">Rezolva</button>
+      ` : ""}
+      ${exam.status === "active" && exam.has_result ? `
+        <span class="muted-note">Trimis deja</span>
+      ` : ""}
+    </article>
+  `).join("");
+}
+
+function getSubjectName(subjectId) {
+  const subject = groupSubjects(studentSubjects, studentExams)
+    .find((item) => String(item.id) === String(subjectId));
+
+  return subject?.name || "Fara materie";
+}
+
+function getExamStatusDetail(exam) {
+  if (exam.status === "active" && exam.has_result) {
+    return "Trimis";
+  }
+
+  if (exam.status === "active") {
+    return "Activ / netrimis";
+  }
+
+  if (exam.status === "future") {
+    return "Programat";
+  }
+
+  return "Finalizat";
+}
+
+/*
+----------------------------
+       Meniu principal student
+----------------------------
+Construieste cardurile globale: calendar, catalog, anunturi, profil, status si reguli.
+*/
+function renderGlobalStudentPanels() {
+  const subjectGroups = groupSubjects(studentSubjects, studentExams);
+  const calendarExams = [...studentExams]
+    .filter((exam) => ["future", "active"].includes(exam.status))
+    .sort((first, second) => new Date(first.exam_date).getTime() - new Date(second.exam_date).getTime());
+
+  studentCalendarList.innerHTML = calendarExams.length
+    ? calendarExams.map((exam) => `
+      <article class="exam-card">
+        <div>
+          <h3>${escapeHtml(exam.title)}</h3>
+          <div class="exam-card-meta">
+            <span>${escapeHtml(exam.subject_name)}</span>
+            <span>${formatExamDate(exam.exam_date)}</span>
+          </div>
+        </div>
+        <span class="status-badge status-${escapeHtml(exam.status)}">${getStatusText(exam.status)}</span>
+      </article>
+    `).join("")
+    : "<p>Nu exista examene viitoare sau active.</p>";
+
+  studentHistoryList.innerHTML = studentResults.length
+    ? studentResults.map((result) => `
+      <article class="exam-card">
+        <div>
+          <h3>${escapeHtml(result.title)}</h3>
+          <div class="exam-card-meta">
+            <span>${escapeHtml(result.subject_name)}</span>
+            <span>${formatExamDate(result.submitted_at)}</span>
+            <span>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)} puncte</span>
+          </div>
+        </div>
+        <span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>
+      </article>
+    `).join("")
+    : "<p>Nu exista note salvate.</p>";
+
+  const subjectsWithAnnouncements = subjectGroups
+    .filter((subject) => subject.info && subject.info.trim());
+
+  studentAnnouncementsList.innerHTML = subjectsWithAnnouncements.length
+    ? subjectsWithAnnouncements.map((subject) => `
+      <article class="exam-card">
+        <div>
+          <h3>${escapeHtml(subject.name)}</h3>
+          <p class="preserve-lines">${escapeHtml(subject.info)}</p>
+        </div>
+      </article>
+    `).join("")
+    : "<p>Nu exista anunturi publicate.</p>";
+
+  studentProfileContent.innerHTML = `
+    <article class="profile-item">
+      <span>Nume</span>
+      <strong>${escapeHtml(user.full_name || "-")}</strong>
+    </article>
+    <article class="profile-item">
+      <span>Email</span>
+      <strong>${escapeHtml(user.email || "-")}</strong>
+    </article>
+    <article class="profile-item">
+      <span>Grupa</span>
+      <strong>${escapeHtml(user.matriculation_number || "-")}</strong>
+    </article>
+  `;
+
+  const finishedStatusExams = studentExams
+    .filter((exam) => exam.status === "finished" || exam.status === "archived");
+
+  studentStatusList.innerHTML = finishedStatusExams.length
+    ? [...finishedStatusExams]
+      .sort((first, second) => new Date(first.exam_date).getTime() - new Date(second.exam_date).getTime())
+      .map((exam) => `
+        <article class="exam-card">
+          <div>
+            <h3>${escapeHtml(exam.title)}</h3>
+            <div class="exam-card-meta">
+              <span>${escapeHtml(getSubjectName(exam.subject_id))}</span>
+              <span>${formatExamDate(exam.exam_date)}</span>
+              <span>${escapeHtml(getExamStatusDetail(exam))}</span>
+            </div>
+          </div>
+          <span class="status-badge status-${escapeHtml(exam.status)}">${getStatusText(exam.status)}</span>
+        </article>
+      `).join("")
+    : "<p>Nu exista examene finalizate.</p>";
+
+  const subjectsWithRules = selectedSubjectId
+    ? subjectGroups.filter((subject) => String(subject.id) === String(selectedSubjectId))
+    : subjectGroups;
+  const visibleRules = subjectsWithRules.filter((subject) => subject.rules && subject.rules.trim());
+
+  studentRulesContent.innerHTML = visibleRules.length
+    ? visibleRules.map((subject) => `
+      <article class="exam-card">
+        <div>
+          <h3>${escapeHtml(subject.name)}</h3>
+          <p class="preserve-lines">${escapeHtml(subject.rules)}</p>
+        </div>
+      </article>
+    `).join("")
+    : `
+      <p>Citeste intrebarile atent inainte sa selectezi raspunsurile.</p>
+      <p>Dupa trimitere, testul nu mai poate fi modificat.</p>
+      <p>La intrebarile cu raspunsuri multiple, un raspuns gresit selectat anuleaza un raspuns corect doar in cadrul acelei intrebari.</p>
+      <p>Daca ai o problema tehnica, anunta profesorul inainte sa trimiti testul.</p>
+    `;
+}
+
+function showStudentMainSection(sectionId) {
+  document.querySelectorAll(".student-main-section").forEach((section) => {
+    section.classList.toggle("hidden", section.id !== sectionId);
+  });
+}
+
+function showSubjectSubsection(sectionId) {
+  document.querySelectorAll(".student-subsection").forEach((section) => {
+    section.classList.toggle("hidden", section.id !== sectionId);
+  });
+}
+
+/*
+----------------------------
+        Meniu materie aleasa
+----------------------------
+Deschide o materie si filtreaza examenele, notele si informatiile doar pentru acea materie.
+*/
+function openSubject(subjectId) {
+  const subject = groupSubjects(studentSubjects, studentExams)
+    .find((item) => String(item.id) === String(subjectId));
+
+  selectedSubjectId = subject?.id || null;
+  selectedSubject = subject?.name || "Materie";
+  selectedSubjectTitle.textContent = selectedSubject;
+  subjectInfoText.textContent = subject?.info
+    ? subject.info
+    : "Nu exista informatii publicate pentru aceasta materie.";
+
+  renderSelectedSubjectExams();
+
+  studentQuickMenuSection.classList.add("hidden");
+  studentSubjectsSection.classList.add("hidden");
+  studentSubjectMenuSection.classList.remove("hidden");
+  showSubjectSubsection("subjectExamsPanel");
+}
+
+function renderSelectedSubjectExams() {
+  if (!selectedSubject) {
+    return;
+  }
+
+  const subjectExams = studentExams.filter((exam) => String(exam.subject_id) === String(selectedSubjectId));
+  const future = subjectExams.filter((exam) => exam.status === "future");
+  const active = subjectExams.filter((exam) => exam.status === "active");
+  const finished = subjectExams.filter((exam) => exam.status === "finished" || exam.status === "archived");
+
+  renderExamList(futureExamsList, future, "Nu exista examene programate.");
+  renderExamList(activeExamsList, active, "Nu exista examene incepute.");
+  renderExamList(finishedExamsList, finished, "Nu exista examene terminate.");
+}
+
+/*
+----------------------------
+              Catalog
+----------------------------
+Afiseaza rezultatele studentului, fie global, fie doar pentru materia selectata.
+*/
+function renderStudentResults() {
+  const visibleResults = selectedSubject
+    ? studentResults.filter((result) => String(result.subject_id) === String(selectedSubjectId))
+    : studentResults;
+
+  if (!visibleResults.length) {
+    studentResultsList.innerHTML = "<p>Nu exista note salvate pentru aceasta materie.</p>";
+    return;
+  }
+
+  studentResultsList.innerHTML = visibleResults.map((result) => `
+    <article class="exam-card">
+      <div>
+        <h3>${escapeHtml(result.title)}</h3>
+        <div class="exam-card-meta">
+          <span>${escapeHtml(result.subject_name)}</span>
+          <span>${formatExamDate(result.submitted_at)}</span>
+          <span>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)} puncte</span>
+          <span>Raspunsuri corecte: ${escapeHtml(result.correct_answers_count || 0)}</span>
+          <span>Raspunsuri gresite selectate: ${escapeHtml(result.wrong_answers_count || 0)}</span>
+        </div>
+      </div>
+      <span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>
+    </article>
+  `).join("");
+}
+
+/*
+----------------------------
+          Rezolvare test
+----------------------------
+Randarea testului creeaza intrebarile, raspunsurile selectabile si regulile de examen.
+*/
+function renderTestForm(test) {
+  solveTestTitle.textContent = test.exam.title;
+  solveTestMeta.textContent = `${test.exam.subject_name} - ${test.variant.variant_name}`;
+  selectedAnswersByQuestion = new Map();
+
+  if (!test.questions.length) {
+    solveTestForm.innerHTML = "<p>Acest test nu are intrebari.</p>";
+    return;
+  }
+
+  solveTestForm.innerHTML = `
+    <section class="test-question">
+      <div class="question-title">
+        <strong>Reguli examen</strong>
+      </div>
+      <p class="preserve-lines">${
+        escapeHtml(test.exam.subject_rules || "Citeste intrebarile atent. Dupa trimitere, testul nu mai poate fi modificat.")
+      }</p>
+    </section>
+    <p class="message form-message">
+      Raspunsuri selectate: <strong id="selectedAnswersCount">0</strong>
+    </p>
+    ${test.questions.map((question, questionIndex) => `
+      <section class="test-question" data-question-id="${question.id}">
+        <div class="question-title">
+          <strong>${questionIndex + 1}. ${escapeHtml(question.question_text)}</strong>
+          <span class="muted-note">${escapeHtml(question.points)} puncte</span>
+        </div>
+        ${question.image_path ? `
+          <img class="question-image" src="${escapeHtml(getFileUrl(question.image_path))}" alt="${escapeHtml(question.image_original_name || "Imagine intrebare")}">
+        ` : ""}
+        <div class="test-answer-grid">
+          ${question.answers.map((answer) => `
+            <button
+              class="check-card answer-option"
+              type="button"
+              data-question-id="${question.id}"
+              data-answer-id="${answer.id}"
+              aria-pressed="false"
+            >
+              <span class="check-mark" aria-hidden="true">*</span>
+              <span>${escapeHtml(answer.answer_text)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </section>
+    `).join("")}
+    <button class="primary-button" type="submit">Trimite testul</button>
+  `;
+
+  (test.draftAnswers || []).forEach((draft) => {
+    (draft.answerIds || []).forEach((answerId) => {
+      const card = solveTestForm.querySelector(
+        `.answer-option[data-question-id="${draft.questionId}"][data-answer-id="${answerId}"]`,
+      );
+
+      if (card) {
+        card.classList.add("is-selected");
+        syncSelectedAnswer(card);
+      }
+    });
+  });
+}
+
+function updateSelectedAnswersCount() {
+  const counter = document.getElementById("selectedAnswersCount");
+
+  if (!counter) {
+    return;
+  }
+
+  const count = [...selectedAnswersByQuestion.values()]
+    .reduce((total, answerIds) => total + answerIds.size, 0);
+
+  counter.textContent = String(count);
+}
+
+function setFullscreenLock(isLocked) {
+  if (!fullscreenLockOverlay) {
+    return;
+  }
+
+  fullscreenLockOverlay.classList.toggle("hidden", !isLocked);
+  document.body.classList.toggle("test-fullscreen-locked", isLocked);
+  solveTestForm.querySelectorAll("button, input").forEach((element) => {
+    element.disabled = isLocked;
+  });
+}
+
+function enforceFullscreenLock() {
+  if (!activeTest || isSubmittingTest) {
+    setFullscreenLock(false);
+    return;
+  }
+
+  setFullscreenLock(!document.fullscreenElement);
+}
+
+/*
+----------------------------
+       Salvare raspunsuri live
+----------------------------
+Raspunsurile sunt salvate automat in draft, astfel incat testul poate fi reluat dupa o problema.
+*/
+function buildCurrentAnswersPayload() {
+  if (!activeTest) {
+    return {
+      answers: [],
+      selectedAnswers: [],
+    };
+  }
+
+  const answers = activeTest.questions.map((question) => ({
+    questionId: question.id,
+    answerIds: selectedAnswersByQuestion.has(Number(question.id))
+      ? [...selectedAnswersByQuestion.get(Number(question.id))]
+      : [],
+  }));
+  const selectedAnswers = answers.flatMap((answer) => (
+    answer.answerIds.map((answerId) => ({
+      questionId: answer.questionId,
+      answerId,
+    }))
+  ));
+
+  return {
+    answers,
+    selectedAnswers,
+  };
+}
+
+async function autosaveCurrentAnswers() {
+  if (!activeTest) {
+    return;
+  }
+
+  const payload = buildCurrentAnswersPayload();
+
+  try {
+    const data = await apiRequest(`/student/exams/${activeTest.exam.id}/autosave`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    if (data.saved) {
+      solveTestMessage.textContent = `Salvat automat: ${data.savedCount || 0} raspunsuri selectate.`;
+      solveTestMessage.className = "message form-message success";
+    }
+  } catch (error) {
+    solveTestMessage.textContent = "Conexiunea a cazut sau salvarea automata a esuat. Raspunsurile se vor salva din nou cand revine conexiunea.";
+    solveTestMessage.className = "message form-message error";
+  }
+}
+
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(autosaveCurrentAnswers, 350);
+}
+
+async function logTestEvent(eventType, details = "") {
+  if (!activeTest) {
+    return;
+  }
+
+  const now = Date.now();
+  const lastLogged = lastEventLogAt.get(eventType) || 0;
+
+  if (now - lastLogged < 1500) {
+    return;
+  }
+
+  lastEventLogAt.set(eventType, now);
+
+  try {
+    await apiRequest(`/student/exams/${activeTest.exam.id}/events`, {
+      method: "POST",
+      body: JSON.stringify({ eventType, details }),
+    });
+  } catch (error) {
+    // Evenimentele sunt doar audit; testul nu trebuie blocat daca auditul cade.
+  }
+}
+
+/*
+----------------------------
+      Fullscreen in timpul testului
+----------------------------
+Gestioneaza intrarea si revenirea in fullscreen in timpul rezolvarii testului.
+*/
+async function enterTestFullscreen() {
+  try {
+    if (document.fullscreenElement || !document.documentElement.requestFullscreen) {
+      setFullscreenLock(false);
+      return;
+    }
+
+    await document.documentElement.requestFullscreen();
+    setFullscreenLock(false);
+  } catch (error) {
+    setFullscreenLock(true);
+    logTestEvent("fullscreen_refused", "Browserul nu a permis fullscreen.");
+  }
+}
+
+async function exitTestFullscreen() {
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen();
+    }
+  } catch (error) {
+    // Iesirea din fullscreen este best-effort.
+  }
+}
+
+function syncSelectedAnswer(card) {
+  const questionId = Number(card.dataset.questionId);
+  const answerId = Number(card.dataset.answerId);
+  const isSelected = card.classList.contains("is-selected");
+
+  card.setAttribute("aria-pressed", isSelected ? "true" : "false");
+
+  if (!Number.isInteger(questionId) || !Number.isInteger(answerId)) {
+    return;
+  }
+
+  if (!selectedAnswersByQuestion.has(questionId)) {
+    selectedAnswersByQuestion.set(questionId, new Set());
+  }
+
+  const selectedAnswers = selectedAnswersByQuestion.get(questionId);
+
+  if (isSelected) {
+    selectedAnswers.add(answerId);
+  } else {
+    selectedAnswers.delete(answerId);
+  }
+
+  updateSelectedAnswersCount();
+}
+
+/*
+----------------------------
+       Incarcare date student
+----------------------------
+Se cer din API materiile, examenele si rezultatele disponibile pentru studentul autentificat.
+*/
+function showSubjects() {
+  selectedSubject = null;
+  selectedSubjectId = null;
+  studentQuickMenuSection.classList.remove("hidden");
+  studentSubjectMenuSection.classList.add("hidden");
+  showStudentMainSection("studentSubjectsSection");
+}
+
+async function loadStudentExams(options = {}) {
+  const silent = options.silent === true;
+
+  if (!silent && !studentExamsLoaded) {
+    subjectsList.innerHTML = "<p>Se incarca...</p>";
+  }
+
+  try {
+    const data = await apiRequest("/student/exams");
+    studentSubjects = data.subjects || [];
+    studentExams = data.exams;
+    studentExamsLoaded = true;
+
+    if (selectedSubject) {
+      renderSubjects();
+      renderSelectedSubjectExams();
+    } else {
+      renderSubjects();
+    }
+
+    renderGlobalStudentPanels();
+  } catch (error) {
+    if (!silent) {
+      subjectsList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+    }
+  }
+}
+
+async function loadStudentResults(options = {}) {
+  const silent = options.silent === true;
+
+  if (!silent) {
+    studentResultsList.innerHTML = "<p>Se incarca...</p>";
+  }
+
+  try {
+    const data = await apiRequest("/student/results");
+    studentResults = data.results;
+    renderStudentResults();
+    renderGlobalStudentPanels();
+  } catch (error) {
+    if (!silent) {
+      studentResultsList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+    }
+  }
+}
+
+/*
+----------------------------
+        Deschidere examen
+----------------------------
+Incarca varianta asignata studentului si porneste modul de rezolvare a testului.
+*/
+async function openTest(examId) {
+  solveTestMessage.textContent = "";
+  solveTestForm.innerHTML = "<p>Se incarca testul...</p>";
+  showSubjectSubsection("solveTestPanel");
+  isSubmittingTest = false;
+  await enterTestFullscreen();
+
+  try {
+    const data = await apiRequest(`/student/exams/${examId}/test`);
+    activeTest = data;
+    renderTestForm(data);
+    if ((data.draftAnswers || []).length) {
+      solveTestMessage.textContent = "Am incarcat raspunsurile salvate anterior.";
+      solveTestMessage.className = "message form-message success";
+    }
+  } catch (error) {
+    solveTestForm.innerHTML = "";
+    solveTestMessage.textContent = error.message;
+    solveTestMessage.className = "message form-message error";
+  }
+}
+
+subjectsList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-open-subject]");
+
+  if (!button) {
+    return;
+  }
+
+  openSubject(button.dataset.openSubject);
+});
+
+activeExamsList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-start-test]");
+
+  if (!button) {
+    return;
+  }
+
+  openTest(button.dataset.startTest);
+});
+
+solveTestForm.addEventListener("click", (event) => {
+  const card = event.target.closest(".answer-option[data-question-id][data-answer-id]");
+
+  if (!card || card.disabled) {
+    return;
+  }
+
+  card.classList.toggle("is-selected");
+  syncSelectedAnswer(card);
+  scheduleAutosave();
+});
+
+document.querySelectorAll("[data-student-subsection]").forEach((button) => {
+  button.addEventListener("click", () => {
+    showSubjectSubsection(button.dataset.studentSubsection);
+
+    if (button.dataset.studentSubsection === "subjectGradesPanel") {
+      loadStudentResults();
+    }
+  });
+});
+
+document.querySelectorAll("[data-student-main-section]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    if (button.dataset.studentMainSection === "studentHistorySection") {
+      await loadStudentResults();
+    }
+
+    renderGlobalStudentPanels();
+    showStudentMainSection(button.dataset.studentMainSection);
+  });
+});
+
+document.querySelectorAll("[data-close-student-main]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".student-main-section").forEach((section) => {
+      section.classList.add("hidden");
+    });
+  });
+});
+
+backToSubjectsButton.addEventListener("click", showSubjects);
+refreshStudentExamsButton.addEventListener("click", loadStudentExams);
+refreshStudentResultsButton.addEventListener("click", loadStudentResults);
+
+solveTestForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!activeTest) {
+    return;
+  }
+
+  clearTimeout(autosaveTimer);
+  await autosaveCurrentAnswers();
+
+  const {
+    answers,
+    selectedAnswers,
+  } = buildCurrentAnswersPayload();
+
+  if (!selectedAnswers.length) {
+    solveTestMessage.textContent = "Selecteaza cel putin un raspuns inainte sa trimiti testul.";
+    solveTestMessage.className = "message form-message error";
+    return;
+  }
+
+  solveTestMessage.textContent = "Se trimite testul...";
+  solveTestMessage.className = "message form-message";
+  isSubmittingTest = true;
+  setFullscreenLock(false);
+  solveTestForm.querySelectorAll("button, input").forEach((element) => {
+    element.disabled = true;
+  });
+
+  try {
+    const data = await apiRequest(`/student/exams/${activeTest.exam.id}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers, selectedAnswers }),
+    });
+
+    solveTestMessage.textContent = `Test trimis. Nota: ${data.result.grade}. Raspunsuri salvate: ${data.result.selected_answers_count || 0}`;
+    solveTestMessage.className = "message form-message success";
+    await Promise.all([loadStudentExams({ silent: true }), loadStudentResults({ silent: true })]);
+    activeTest = null;
+    await exitTestFullscreen();
+    isSubmittingTest = false;
+    showSubjectSubsection("subjectExamsPanel");
+    studentSubjectMenuSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    solveTestMessage.textContent = error.message;
+    solveTestMessage.className = "message form-message error";
+    isSubmittingTest = false;
+    solveTestForm.querySelectorAll("button, input").forEach((element) => {
+      element.disabled = false;
+    });
+  }
+});
+
+loadStudentExams();
+setInterval(() => {
+  apiRequest("/student/heartbeat", { method: "POST" }).catch(() => {});
+  loadStudentExams({ silent: true });
+  loadStudentResults({ silent: true });
+}, 3000);
+
+document.addEventListener("keydown", (event) => {
+  if (!activeTest) {
+    return;
+  }
+
+  if (event.key === "Escape" || event.altKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    logTestEvent("blocked_key", event.key === "Escape" ? "Escape" : "Alt");
+  }
+}, true);
+
+document.addEventListener("fullscreenchange", () => {
+  if (activeTest && !document.fullscreenElement && !isSubmittingTest) {
+    setFullscreenLock(true);
+    logTestEvent("fullscreen_exit", "Studentul a iesit din fullscreen.");
+    return;
+  }
+
+  enforceFullscreenLock();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (activeTest && document.visibilityState === "hidden") {
+    logTestEvent("tab_hidden", "Pagina testului nu mai este vizibila.");
+  }
+});
+
+window.addEventListener("blur", () => {
+  if (activeTest) {
+    logTestEvent("window_blur", "Fereastra testului a pierdut focusul.");
+  }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (!activeTest) {
+    return;
+  }
+
+  const token = getToken();
+  const payload = buildCurrentAnswersPayload();
+
+  if (token) {
+    fetch(`${API_BASE_URL}/student/exams/${activeTest.exam.id}/autosave`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
+  event.preventDefault();
+  event.returnValue = "";
+});
+
+if (returnFullscreenButton) {
+  returnFullscreenButton.addEventListener("click", () => {
+    enterTestFullscreen();
+  });
+}
+
+setInterval(enforceFullscreenLock, 700);

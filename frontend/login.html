@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Exam Platform</title>
+  <link rel="stylesheet" href="css/style.css?v=20260509-2">
+</head>
+<body>
+  <!--
+  ----------------------------
+                 Logare
+  ----------------------------
+  Pagina de intrare separa autentificarea profesor/admin de autentificarea studentului.
+  -->
+  <main class="auth-shell">
+    <section class="auth-panel">
+      <!-- Identitatea aplicatiei afisata in formularul de autentificare. -->
+      <div class="brand-block">
+        <span class="brand-mark">EP</span>
+        <div>
+          <h1>Exam Platform</h1>
+          <p>Autentificare pentru profesori si studenti</p>
+        </div>
+      </div>
+
+      <!-- Selectarea tipului de cont: profesor sau student. -->
+      <div class="tabs" role="tablist" aria-label="Tip autentificare">
+        <button class="tab-button active" type="button" data-login-mode="professor">Profesor</button>
+        <button class="tab-button" type="button" data-login-mode="student">Student</button>
+      </div>
+
+      <!-- Formularul se schimba din JavaScript in functie de rolul ales. -->
+      <form id="loginForm" class="form-stack">
+        <div id="professorFields">
+          <label for="identifier">Nume profesor</label>
+          <input id="identifier" name="identifier" type="text" autocomplete="username">
+
+          <label for="password">Parola</label>
+          <div class="input-with-action">
+            <input id="password" name="password" type="password" autocomplete="current-password">
+            <button class="icon-button password-toggle" type="button" data-toggle-password="password" aria-label="Arata parola">
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="studentFields" class="hidden">
+          <label for="fullName">Nume complet</label>
+          <input id="fullName" name="fullName" type="text" autocomplete="name">
+
+          <label for="studentGroup">Grupa</label>
+          <select id="studentGroup" name="studentGroup">
+            <option value="">Alege grupa</option>
+          </select>
+
+          <label for="uniqueCode">Cod unic</label>
+          <div class="input-with-action">
+            <input id="uniqueCode" name="uniqueCode" type="password" autocomplete="one-time-code">
+            <button class="icon-button password-toggle" type="button" data-toggle-password="uniqueCode" aria-label="Arata codul unic">
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <button class="primary-button" type="submit">Intra in cont</button>
+        <p id="loginMessage" class="message" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <!-- Scripturile comune si logica de autentificare. -->
+  <script src="js/api.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>

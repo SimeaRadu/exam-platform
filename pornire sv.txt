@@ -1,0 +1,2 @@
+cd C:\Users\radus\Desktop\exam-platform\backend
+npm run dev

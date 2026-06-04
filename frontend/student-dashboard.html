@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student | Exam Platform</title>
+  <link rel="stylesheet" href="css/style.css?v=20260601-2">
+</head>
+<body>
+  <!--
+  ----------------------------
+              Header student
+  ----------------------------
+  Afiseaza numele studentului autentificat si butonul de iesire din cont.
+  -->
+  <header class="topbar">
+    <div>
+      <h1>Dashboard student</h1>
+      <p id="studentName">Cont student</p>
+    </div>
+    <button id="logoutButton" class="ghost-button" type="button">Logout</button>
+  </header>
+
+  <main class="dashboard-layout">
+    <!--
+    ----------------------------
+              Meniu student
+    ----------------------------
+    Cardurile principale duc spre materiile studentului, catalog, anunturi, profil si reguli.
+    -->
+    <section id="studentQuickMenuSection" class="panel">
+      <div class="section-heading">
+        <h2>Meniu student</h2>
+        <p>Acces rapid la examene, note si informatii.</p>
+      </div>
+
+      <div class="admin-menu-grid">
+        <button class="admin-menu-card" type="button" data-student-main-section="studentSubjectsSection">
+          <span class="menu-card-icon">M</span>
+          <strong>Materiile mele</strong>
+          <span>Alege materia pentru examene, note si informatii.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentCalendarSection">
+          <span class="menu-card-icon">C</span>
+          <strong>Calendar examene</strong>
+          <span>Examene viitoare si active, in ordine cronologica.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentHistorySection">
+          <span class="menu-card-icon">N</span>
+          <strong>Catalog</strong>
+          <span>Toate rezultatele tale, pe materii.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentAnnouncementsSection">
+          <span class="menu-card-icon">A</span>
+          <strong>Anunturi</strong>
+          <span>Informatii publicate de profesori.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentProfileSection">
+          <span class="menu-card-icon">P</span>
+          <strong>Profil student</strong>
+          <span>Datele contului tau.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentStatusSection">
+          <span class="menu-card-icon">S</span>
+          <strong>Examene Finalizate</strong>
+          <span>Examene terminate si arhivate.</span>
+        </button>
+
+        <button class="admin-menu-card" type="button" data-student-main-section="studentRulesSection">
+          <span class="menu-card-icon">R</span>
+          <strong>Reguli examen</strong>
+          <span>Reguli afisate inainte de test.</span>
+        </button>
+      </div>
+    </section>
+
+    <!--
+    ----------------------------
+            Calendar examene
+    ----------------------------
+    Lista cronologica pentru examenele viitoare si active.
+    -->
+    <section id="studentCalendarSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Calendar examene</h2>
+          <p>Examene viitoare si active, ordonate dupa data.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentCalendarList" class="exam-card-list"></div>
+    </section>
+
+    <!--
+    ----------------------------
+                Catalog
+    ----------------------------
+    Afiseaza toate notele studentului, indiferent de materia selectata.
+    -->
+    <section id="studentHistorySection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Catalog</h2>
+          <p>Toate rezultatele tale salvate.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentHistoryList" class="exam-card-list"></div>
+    </section>
+
+    <!--
+    ----------------------------
+                Anunturi
+    ----------------------------
+    Strange intr-un singur loc mesajele publicate de profesori pentru materii.
+    -->
+    <section id="studentAnnouncementsSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Anunturi</h2>
+          <p>Mesaje publicate la materiile disponibile.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentAnnouncementsList" class="exam-card-list"></div>
+    </section>
+
+    <!--
+    ----------------------------
+            Profil student
+    ----------------------------
+    Prezinta datele contului: nume, email si grupa.
+    -->
+    <section id="studentProfileSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Profil student</h2>
+          <p>Datele contului autentificat.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentProfileContent" class="profile-grid"></div>
+    </section>
+
+    <!--
+    ----------------------------
+          Examene finalizate
+    ----------------------------
+    Separat de calendar, arata examenele terminate sau arhivate.
+    -->
+    <section id="studentStatusSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Examene Finalizate</h2>
+          <p>Examenele terminate sau arhivate.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentStatusList" class="exam-card-list"></div>
+    </section>
+
+    <!--
+    ----------------------------
+             Reguli examen
+    ----------------------------
+    Afiseaza regulile salvate de profesor pentru materiile disponibile.
+    -->
+    <section id="studentRulesSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Reguli examen</h2>
+          <p>Reguli generale inainte de rezolvare.</p>
+        </div>
+        <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+      </div>
+      <div id="studentRulesContent" class="rules-list"></div>
+    </section>
+
+    <!--
+    ----------------------------
+             Materiile mele
+    ----------------------------
+    Punctul de intrare in fiecare materie si in examenele ei.
+    -->
+    <section id="studentSubjectsSection" class="panel student-main-section hidden">
+      <div class="section-heading horizontal">
+        <div>
+          <h2>Materiile mele</h2>
+          <p>Alege materia pentru care vrei sa vezi examenele si notele.</p>
+        </div>
+        <div class="action-row">
+          <button id="refreshStudentExamsButton" class="secondary-button" type="button">Refresh</button>
+          <button class="secondary-button" type="button" data-close-student-main>Inchide</button>
+        </div>
+      </div>
+      <div id="subjectsList" class="admin-menu-grid"></div>
+    </section>
+
+    <!--
+    ----------------------------
+          Meniu materie aleasa
+    ----------------------------
+    Dupa alegerea unei materii, studentul vede doar examenele, notele si informatiile ei.
+    -->
+    <section id="studentSubjectMenuSection" class="hidden dashboard-section">
+      <section class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="selectedSubjectTitle">Materie</h2>
+            <p>Meniu pentru materia selectata.</p>
+          </div>
+          <button id="backToSubjectsButton" class="secondary-button" type="button">Inapoi la materii</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="admin-menu-grid">
+          <button class="admin-menu-card" type="button" data-student-subsection="subjectExamsPanel">
+            <span class="menu-card-icon">E</span>
+            <strong>Examene</strong>
+            <span>Vezi examene programate, incepute si terminate.</span>
+          </button>
+
+          <button class="admin-menu-card" type="button" data-student-subsection="subjectGradesPanel">
+            <span class="menu-card-icon">N</span>
+            <strong>Note</strong>
+            <span>Vezi rezultatele obtinute la examenele finalizate.</span>
+          </button>
+
+          <button class="admin-menu-card" type="button" data-student-subsection="subjectInfoPanel">
+            <span class="menu-card-icon">I</span>
+            <strong>Informatii</strong>
+            <span>Detalii despre materia selectata.</span>
+          </button>
+        </div>
+      </section>
+
+      <div id="subjectExamsPanel" class="student-subsection dashboard-section">
+        <!-- Listele sunt separate dupa status: programat, inceput, terminat. -->
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Examene programate</h2>
+            <p>Examene care urmeaza sa fie pornite de profesor.</p>
+          </div>
+          <div id="futureExamsList" class="exam-card-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Examene incepute</h2>
+            <p>Examene active disponibile pentru rezolvare.</p>
+          </div>
+          <div id="activeExamsList" class="exam-card-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Examene terminate</h2>
+            <p>Examene finalizate de profesor.</p>
+          </div>
+          <div id="finishedExamsList" class="exam-card-list"></div>
+        </section>
+      </div>
+
+      <!-- Notele obtinute la materia selectata. -->
+      <section id="subjectGradesPanel" class="panel student-subsection hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Note</h2>
+            <p>Rezultatele obtinute la testele trimise.</p>
+          </div>
+          <button id="refreshStudentResultsButton" class="secondary-button" type="button">Refresh</button>
+        </div>
+        <div id="studentResultsList" class="exam-card-list"></div>
+      </section>
+
+      <!-- Informatiile si anunturile publicate de profesor pentru materie. -->
+      <section id="subjectInfoPanel" class="panel student-subsection hidden">
+        <div class="section-heading">
+          <h2>Informatii</h2>
+          <p id="subjectInfoText" class="preserve-lines">Detalii despre materia selectata.</p>
+        </div>
+      </section>
+
+      <!-- Formularul efectiv de rezolvare a testului. -->
+      <section id="solveTestPanel" class="panel student-subsection hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="solveTestTitle">Rezolvare test</h2>
+            <p id="solveTestMeta">Completeaza raspunsurile si trimite testul.</p>
+          </div>
+          <button class="secondary-button" type="button" data-student-subsection="subjectExamsPanel">Inapoi la examene</button>
+        </div>
+
+        <form id="solveTestForm" class="test-form"></form>
+        <p id="solveTestMessage" class="message form-message" aria-live="polite"></p>
+      </section>
+    </section>
+  </main>
+
+  <!-- Overlay folosit cand studentul iese din fullscreen in timpul testului. -->
+  <div id="fullscreenLockOverlay" class="fullscreen-lock hidden" role="alertdialog" aria-modal="true">
+    <div class="fullscreen-lock-panel">
+      <h2>Revino in fullscreen</h2>
+      <p>Testul este blocat pana revii in modul fullscreen.</p>
+      <button id="returnFullscreenButton" class="primary-button" type="button">Revino in fullscreen</button>
+    </div>
+  </div>
+
+  <!-- Scripturile pentru API si dashboard student. -->
+  <script src="js/api.js?v=20260601-1"></script>
+  <script src="js/student-dashboard.js?v=20260601-2"></script>
+</body>
+</html>
