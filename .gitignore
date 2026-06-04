@@ -11,6 +11,7 @@ backend/node_modules/
 # Fisiere generate local
 *.log
 npm-debug.log*
+database/local-data-export.sql
 
 # Upload-uri locale din teste
 backend/uploads/questions/*
