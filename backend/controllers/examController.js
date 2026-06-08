@@ -564,7 +564,8 @@ function parseRtfQuestions(text) {
 
       if (continuation) {
         if (lastAnswerIndex !== null && currentQuestion.answers[lastAnswerIndex]) {
-          currentQuestion.answers[lastAnswerIndex] = `${currentQuestion.answers[lastAnswerIndex]} ${continuation}`.trim();
+          lastAnswerIndex = currentQuestion.answers.length;
+          currentQuestion.answers.push(continuation);
         } else {
           currentQuestion.questionText = `${currentQuestion.questionText} ${continuation}`.trim();
         }

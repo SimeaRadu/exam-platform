@@ -1165,9 +1165,9 @@ function renderVariantsList() {
         <button class="danger-button" type="button" data-delete-variant="${variant.id}">Sterge varianta</button>
       </div>
       <div class="question-list">
-        ${variant.questions.length ? variant.questions.map((question) => `
+        ${variant.questions.length ? variant.questions.map((question, questionIndex) => `
           <div class="question-item">
-            <strong>${escapeHtml(question.question_text)}</strong>
+            <strong>${escapeHtml(questionIndex + 1)}. ${escapeHtml(question.question_text)}</strong>
             <span class="muted-note">(${escapeHtml(question.points)} puncte)</span>
             ${question.image_path ? `
               <img class="question-image" src="${escapeHtml(getFileUrl(question.image_path))}" alt="${escapeHtml(question.image_original_name || "Imagine intrebare")}">
