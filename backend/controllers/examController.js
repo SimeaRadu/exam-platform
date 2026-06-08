@@ -864,7 +864,14 @@ async function listSubjects(req, res) {
                s.info_text, s.rules_text, s.created_at
         FROM subjects s
         LEFT JOIN users u ON u.id = s.professor_id
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId
+        WHERE @isAdmin = 1
+           OR s.professor_id = @professorId
+           OR EXISTS (
+             SELECT 1
+             FROM exams e
+             WHERE e.subject_id = s.id
+               AND e.created_by = @professorId
+           )
         ORDER BY s.name
       `);
     const professors = admin
@@ -1257,7 +1264,7 @@ async function listExams(req, res) {
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
         LEFT JOIN users p ON p.id = s.professor_id
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId
+        WHERE @isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId
         ORDER BY
           CASE
             WHEN e.status IN ('future', 'active') THEN 0
@@ -1965,7 +1972,7 @@ async function listResults(req, res) {
           WHERE ste.student_id = r.student_id
             AND ste.exam_id = r.exam_id
         ) events
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId
+        WHERE @isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId
         ORDER BY r.submitted_at DESC
       `);
 
