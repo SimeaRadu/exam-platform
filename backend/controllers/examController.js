@@ -14,6 +14,40 @@ const path = require("path");
 const windows1250Decoder = new TextDecoder("windows-1250");
 const rtfQuestionImageDir = path.join(__dirname, "..", "uploads", "questions");
 
+function getStoredQuestionImageName(imagePath) {
+  const normalizedPath = String(imagePath || "").replace(/\\/g, "/");
+
+  if (!normalizedPath.startsWith("/uploads/questions/")) {
+    return null;
+  }
+
+  const fileName = path.basename(normalizedPath);
+
+  if (!fileName || fileName === "." || fileName === "..") {
+    return null;
+  }
+
+  return fileName;
+}
+
+async function deleteQuestionImageFiles(imagePaths) {
+  const fileNames = [...new Set(
+    (imagePaths || [])
+      .map(getStoredQuestionImageName)
+      .filter(Boolean),
+  )];
+
+  await Promise.all(fileNames.map(async (fileName) => {
+    try {
+      await fs.unlink(path.join(rtfQuestionImageDir, fileName));
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        console.warn(`Nu am putut sterge imaginea ${fileName}: ${error.message}`);
+      }
+    }
+  }));
+}
+
 /*
 ----------------------------
        Parsare campuri JSON
@@ -888,6 +922,7 @@ async function updateSubjectInfo(req, res) {
 async function deleteSubject(req, res) {
   try {
     const subjectId = Number(req.params.id);
+    const imagePathsToDelete = [];
 
     if (!Number.isInteger(subjectId)) {
       return res.status(400).json({
@@ -916,7 +951,7 @@ async function deleteSubject(req, res) {
         .query("SELECT id FROM exams WHERE subject_id = @subjectId");
 
       for (const exam of examsResult.recordset) {
-        await deleteExamData(transaction, Number(exam.id));
+        imagePathsToDelete.push(...await deleteExamData(transaction, Number(exam.id)));
       }
 
       await new sql.Request(transaction)
@@ -928,6 +963,8 @@ async function deleteSubject(req, res) {
       await transaction.rollback();
       throw error;
     }
+
+    await deleteQuestionImageFiles(imagePathsToDelete);
 
     res.json({
       message: "Materie stearsa.",
@@ -947,6 +984,17 @@ async function deleteSubject(req, res) {
 */
 // Creeaza, listeaza, modifica statusul, arhiveaza si sterge examenele.
 async function deleteExamData(transaction, examId) {
+  const imageResult = await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
+    .query(`
+      SELECT q.image_path
+      FROM questions q
+      INNER JOIN exam_variants v ON v.id = q.variant_id
+      WHERE v.exam_id = @examId
+        AND q.image_path IS NOT NULL
+    `);
+  const imagePaths = imageResult.recordset.map((row) => row.image_path);
+
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
     .query("DELETE FROM student_answer_drafts WHERE exam_id = @examId");
@@ -997,6 +1045,8 @@ async function deleteExamData(transaction, examId) {
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
     .query("DELETE FROM exams WHERE id = @examId");
+
+  return imagePaths;
 }
 
 /*
@@ -1176,6 +1226,7 @@ async function updateExamStatus(req, res) {
 async function deleteExam(req, res) {
   try {
     const examId = Number(req.params.id);
+    let imagePathsToDelete = [];
 
     if (!Number.isInteger(examId)) {
       return res.status(400).json({
@@ -1207,12 +1258,14 @@ async function deleteExam(req, res) {
     await transaction.begin();
 
     try {
-      await deleteExamData(transaction, examId);
+      imagePathsToDelete = await deleteExamData(transaction, examId);
       await transaction.commit();
     } catch (error) {
       await transaction.rollback();
       throw error;
     }
+
+    await deleteQuestionImageFiles(imagePathsToDelete);
 
     res.json({
       message: "Examen sters.",
@@ -1436,6 +1489,16 @@ async function deleteVariant(req, res) {
     }
 
     const examId = Number(variantResult.recordset[0].exam_id);
+    const imageResult = await pool
+      .request()
+      .input("variantId", sql.Int, variantId)
+      .query(`
+        SELECT image_path
+        FROM questions
+        WHERE variant_id = @variantId
+          AND image_path IS NOT NULL
+      `);
+    const imagePathsToDelete = imageResult.recordset.map((row) => row.image_path);
 
     if (!(await canManageExam(pool, req, examId))) {
       return res.status(403).json({
@@ -1448,13 +1511,27 @@ async function deleteVariant(req, res) {
       .input("examId", sql.Int, examId)
       .input("variantId", sql.Int, variantId)
       .query(`
-        SELECT TOP 1 r.id
-        FROM results r
-        INNER JOIN student_exam_assignments a
-          ON a.student_id = r.student_id
-          AND a.exam_id = r.exam_id
-        WHERE r.exam_id = @examId
-          AND a.variant_id = @variantId
+        SELECT TOP 1 id
+        FROM (
+          SELECT r.id
+          FROM results r
+          INNER JOIN student_exam_assignments a
+            ON a.student_id = r.student_id
+            AND a.exam_id = r.exam_id
+          WHERE r.exam_id = @examId
+            AND a.variant_id = @variantId
+
+          UNION
+
+          SELECT r.id
+          FROM results r
+          INNER JOIN student_answers sa
+            ON sa.student_id = r.student_id
+            AND sa.exam_id = r.exam_id
+          INNER JOIN questions q ON q.id = sa.question_id
+          WHERE r.exam_id = @examId
+            AND q.variant_id = @variantId
+        ) saved_results
       `);
 
     if (resultCheck.recordset.length > 0) {
@@ -1483,6 +1560,15 @@ async function deleteVariant(req, res) {
       await new sql.Request(transaction)
         .input("variantId", sql.Int, variantId)
         .query(`
+          DELETE sa
+          FROM student_answers sa
+          INNER JOIN questions q ON q.id = sa.question_id
+          WHERE q.variant_id = @variantId
+        `);
+
+      await new sql.Request(transaction)
+        .input("variantId", sql.Int, variantId)
+        .query(`
           DELETE a
           FROM answers a
           INNER JOIN questions q ON q.id = a.question_id
@@ -1502,6 +1588,8 @@ async function deleteVariant(req, res) {
       await transaction.rollback();
       throw error;
     }
+
+    await deleteQuestionImageFiles(imagePathsToDelete);
 
     res.json({
       message: "Varianta stearsa.",
