@@ -471,6 +471,7 @@ function parseRtfQuestions(text) {
   let currentVariant = null;
   let currentQuestion = null;
   let lastAnswerIndex = null;
+  let pendingCorrectMarker = false;
 
   function ensureVariant() {
     if (!currentVariant) {
@@ -487,26 +488,65 @@ function parseRtfQuestions(text) {
 
   function finishQuestion() {
     if (currentQuestion) {
+      currentQuestion.questionText = currentQuestion.questionText.trim();
       ensureVariant().questions.push(currentQuestion);
       currentQuestion = null;
       lastAnswerIndex = null;
+      pendingCorrectMarker = false;
     }
   }
 
+  function appendQuestionText(value) {
+    const text = String(value || "").trim();
+
+    if (text && currentQuestion) {
+      currentQuestion.questionText = `${currentQuestion.questionText} ${text}`.trim();
+    }
+  }
+
+  function applyQuestionHeaderRemainder(value) {
+    const remainder = String(value || "").trim();
+
+    if (!remainder || !currentQuestion) {
+      return;
+    }
+
+    const pointMatch = remainder.match(/^\(([0-9]+(?:[.,][0-9]+)?)\s*p?\)\s*(.*)$/i);
+
+    if (pointMatch) {
+      currentQuestion.points = Number(String(pointMatch[1]).replace(",", ".")) || 1;
+      appendQuestionText(pointMatch[2]);
+      return;
+    }
+
+    appendQuestionText(remainder);
+  }
+
   lines.forEach((line) => {
-    const questionMatch = line.match(/^Q?\s*(\d+)[\.)]\s*(?:\(([0-9]+(?:[.,][0-9]+)?)\s*p?\)?)?\s*(.*)$/i);
+    const questionMatch = line.match(/^Q\s*(\d+)\s*[\.)]?\s*(.*)$/i);
     const starredAnswer = line.match(/^(\*)?\s*([a-fA-F])[\.)]\s*(.+)$/);
 
     if (questionMatch) {
       finishQuestion();
       ensureVariant();
       currentQuestion = {
-        questionText: questionMatch[3].trim(),
-        points: Number(String(questionMatch[2] || "1").replace(",", ".")) || 1,
+        questionText: "",
+        points: 1,
         answers: [],
         correctAnswerIndexes: [],
       };
       lastAnswerIndex = null;
+      pendingCorrectMarker = false;
+      applyQuestionHeaderRemainder(questionMatch[2]);
+      return;
+    }
+
+    if (line === "." && currentQuestion && currentQuestion.answers.length === 0) {
+      return;
+    }
+
+    if (line === "*" && currentQuestion) {
+      pendingCorrectMarker = true;
       return;
     }
 
@@ -515,11 +555,22 @@ function parseRtfQuestions(text) {
       currentQuestion.answers.push(starredAnswer[3].trim());
       lastAnswerIndex = answerIndex;
 
-      if (starredAnswer[1]) {
+      if (starredAnswer[1] || pendingCorrectMarker) {
         currentQuestion.correctAnswerIndexes.push(answerIndex);
       }
 
+      pendingCorrectMarker = false;
       return;
+    }
+
+    if (currentQuestion && currentQuestion.answers.length === 0) {
+      const pointLine = line.match(/^\(([0-9]+(?:[.,][0-9]+)?)\s*p?\)\s*(.*)$/i);
+
+      if (pointLine) {
+        currentQuestion.points = Number(String(pointLine[1]).replace(",", ".")) || 1;
+        appendQuestionText(pointLine[2]);
+        return;
+      }
     }
 
     const [rawKey, ...rawValueParts] = line.split(":");
@@ -544,6 +595,10 @@ function parseRtfQuestions(text) {
     if (letterAnswer && currentQuestion) {
       lastAnswerIndex = currentQuestion.answers.length;
       currentQuestion.answers.push(letterAnswer[2].trim());
+      if (pendingCorrectMarker) {
+        currentQuestion.correctAnswerIndexes.push(lastAnswerIndex);
+      }
+      pendingCorrectMarker = false;
       return;
     }
 
@@ -556,6 +611,7 @@ function parseRtfQuestions(text) {
       };
       variants.push(currentVariant);
       lastAnswerIndex = null;
+      pendingCorrectMarker = false;
       return;
     }
 
@@ -573,6 +629,7 @@ function parseRtfQuestions(text) {
         correctAnswerIndexes: [],
       };
       lastAnswerIndex = null;
+      pendingCorrectMarker = false;
       return;
     }
 
@@ -584,12 +641,17 @@ function parseRtfQuestions(text) {
     if (["RASPUNS", "ANSWER"].includes(key) && currentQuestion) {
       lastAnswerIndex = currentQuestion.answers.length;
       currentQuestion.answers.push(value);
+      if (pendingCorrectMarker) {
+        currentQuestion.correctAnswerIndexes.push(lastAnswerIndex);
+      }
+      pendingCorrectMarker = false;
       return;
     }
 
     if (["CORECT", "CORRECT"].includes(key) && currentQuestion) {
       currentQuestion.correctAnswerIndexes = parseCorrectIndexes(value);
       lastAnswerIndex = null;
+      pendingCorrectMarker = false;
       return;
     }
 
@@ -597,11 +659,13 @@ function parseRtfQuestions(text) {
       const continuation = line.replace(/^p\)\s*/i, "").trim();
 
       if (continuation) {
-        if (lastAnswerIndex !== null && currentQuestion.answers[lastAnswerIndex]) {
+        if (currentQuestion.answers.length === 0) {
+          appendQuestionText(continuation);
+        } else if (lastAnswerIndex !== null && currentQuestion.answers[lastAnswerIndex]) {
           lastAnswerIndex = currentQuestion.answers.length;
           currentQuestion.answers.push(continuation);
         } else {
-          currentQuestion.questionText = `${currentQuestion.questionText} ${continuation}`.trim();
+          appendQuestionText(continuation);
         }
       }
     }
