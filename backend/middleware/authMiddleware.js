@@ -139,10 +139,14 @@ function isAdminUser(user) {
     return false;
   }
 
-  const adminCode = process.env.ADMIN_UNIQUE_CODE || "PROF-ADMIN";
+  const adminCodes = new Set(
+    [process.env.ADMIN_UNIQUE_CODE, "PROF-ADMIN"]
+      .map((code) => String(code || "").trim())
+      .filter(Boolean),
+  );
 
-  return user.uniqueCode === adminCode
-    || user.unique_code === adminCode;
+  return adminCodes.has(String(user.uniqueCode || "").trim())
+    || adminCodes.has(String(user.unique_code || "").trim());
 }
 
 function requireAdmin(req, res, next) {
