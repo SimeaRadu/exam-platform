@@ -71,6 +71,12 @@ function decodeRtfHex(hex) {
   return windows1250Decoder.decode(Uint8Array.from([parseInt(hex, 16)]));
 }
 
+function removeRtfControlWords(value) {
+  return String(value || "")
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
+    .replace(/\\./g, "");
+}
+
 function removeRtfDestinationGroups(input) {
   const blockedDestinations = new Set([
     "pict",
@@ -137,7 +143,7 @@ function stripRtf(buffer) {
       return String.fromCharCode(value < 0 ? value + 65536 : value);
     })
     .replace(/[{}]/g, "")
-    .replace(/\\[a-zA-Z]+\d* ?/g, "")
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
     .replace(/\\./g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -163,15 +169,14 @@ function findBalancedGroupEnd(input, startIndex) {
 
 function getLastQuestionNumber(rawPrefix) {
   let lastQuestionNumber = null;
-  const plainPrefix = rawPrefix
+  const decodedPrefix = rawPrefix
     .replace(/\\'([0-9a-fA-F]{2})/g, (match, hex) => decodeRtfHex(hex))
     .replace(/\\u(-?\d+)\??/g, (match, code) => {
       const value = Number(code);
       return String.fromCharCode(value < 0 ? value + 65536 : value);
     })
-    .replace(/\\[a-zA-Z]+\d* ?/g, "")
-    .replace(/\\./g, "")
     .replace(/[{}]/g, "");
+  const plainPrefix = removeRtfControlWords(decodedPrefix);
   const questionPattern = /Q\s*(\d+)[\.)]/gi;
   let match;
 
@@ -431,6 +436,7 @@ function parseRtfQuestions(text) {
   const variants = [];
   let currentVariant = null;
   let currentQuestion = null;
+  let lastAnswerIndex = null;
 
   function ensureVariant() {
     if (!currentVariant) {
@@ -449,12 +455,13 @@ function parseRtfQuestions(text) {
     if (currentQuestion) {
       ensureVariant().questions.push(currentQuestion);
       currentQuestion = null;
+      lastAnswerIndex = null;
     }
   }
 
   lines.forEach((line) => {
     const questionMatch = line.match(/^Q?\s*(\d+)[\.)]\s*(?:\(([0-9]+(?:[.,][0-9]+)?)\s*p?\)?)?\s*(.*)$/i);
-    const starredAnswer = line.match(/^(\*)?\s*([a-fA-F])[\.)]\s+(.+)$/);
+    const starredAnswer = line.match(/^(\*)?\s*([a-fA-F])[\.)]\s*(.+)$/);
 
     if (questionMatch) {
       finishQuestion();
@@ -465,12 +472,14 @@ function parseRtfQuestions(text) {
         answers: [],
         correctAnswerIndexes: [],
       };
+      lastAnswerIndex = null;
       return;
     }
 
     if (starredAnswer && currentQuestion) {
       const answerIndex = currentQuestion.answers.length;
       currentQuestion.answers.push(starredAnswer[3].trim());
+      lastAnswerIndex = answerIndex;
 
       if (starredAnswer[1]) {
         currentQuestion.correctAnswerIndexes.push(answerIndex);
@@ -483,7 +492,7 @@ function parseRtfQuestions(text) {
     const key = normalizeImportKey(rawKey);
     const value = rawValueParts.join(":").trim();
     const numberedQuestion = line.match(/^\d+[\.)]\s+(.+)$/);
-    const letterAnswer = line.match(/^([a-fA-F])[\.)]\s+(.+)$/);
+    const letterAnswer = line.match(/^([a-fA-F])[\.)]\s*(.+)$/);
 
     if (numberedQuestion) {
       finishQuestion();
@@ -494,10 +503,12 @@ function parseRtfQuestions(text) {
         answers: [],
         correctAnswerIndexes: [],
       };
+      lastAnswerIndex = null;
       return;
     }
 
     if (letterAnswer && currentQuestion) {
+      lastAnswerIndex = currentQuestion.answers.length;
       currentQuestion.answers.push(letterAnswer[2].trim());
       return;
     }
@@ -510,6 +521,7 @@ function parseRtfQuestions(text) {
         questions: [],
       };
       variants.push(currentVariant);
+      lastAnswerIndex = null;
       return;
     }
 
@@ -526,6 +538,7 @@ function parseRtfQuestions(text) {
         answers: [],
         correctAnswerIndexes: [],
       };
+      lastAnswerIndex = null;
       return;
     }
 
@@ -535,12 +548,14 @@ function parseRtfQuestions(text) {
     }
 
     if (["RASPUNS", "ANSWER"].includes(key) && currentQuestion) {
+      lastAnswerIndex = currentQuestion.answers.length;
       currentQuestion.answers.push(value);
       return;
     }
 
     if (["CORECT", "CORRECT"].includes(key) && currentQuestion) {
       currentQuestion.correctAnswerIndexes = parseCorrectIndexes(value);
+      lastAnswerIndex = null;
       return;
     }
 
@@ -548,7 +563,11 @@ function parseRtfQuestions(text) {
       const continuation = line.replace(/^p\)\s*/i, "").trim();
 
       if (continuation) {
-        currentQuestion.questionText = `${currentQuestion.questionText} ${continuation}`.trim();
+        if (lastAnswerIndex !== null && currentQuestion.answers[lastAnswerIndex]) {
+          currentQuestion.answers[lastAnswerIndex] = `${currentQuestion.answers[lastAnswerIndex]} ${continuation}`.trim();
+        } else {
+          currentQuestion.questionText = `${currentQuestion.questionText} ${continuation}`.trim();
+        }
       }
     }
   });
