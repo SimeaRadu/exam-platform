@@ -163,14 +163,172 @@ function findBalancedGroupEnd(input, startIndex) {
 
 function getLastQuestionNumber(rawPrefix) {
   let lastQuestionNumber = null;
+  const plainPrefix = rawPrefix
+    .replace(/\\'([0-9a-fA-F]{2})/g, (match, hex) => decodeRtfHex(hex))
+    .replace(/\\u(-?\d+)\??/g, (match, code) => {
+      const value = Number(code);
+      return String.fromCharCode(value < 0 ? value + 65536 : value);
+    })
+    .replace(/\\[a-zA-Z]+\d* ?/g, "")
+    .replace(/\\./g, "")
+    .replace(/[{}]/g, "");
   const questionPattern = /Q\s*(\d+)[\.)]/gi;
   let match;
 
-  while ((match = questionPattern.exec(rawPrefix)) !== null) {
+  while ((match = questionPattern.exec(plainPrefix)) !== null) {
     lastQuestionNumber = Number(match[1]);
   }
 
   return lastQuestionNumber;
+}
+
+function readUInt32LE(buffer, offset) {
+  if (buffer.length < offset + 4) {
+    return 0;
+  }
+
+  return buffer.readUInt32LE(offset);
+}
+
+function convertDibToBmp(dibBuffer) {
+  if (dibBuffer.length < 16) {
+    return null;
+  }
+
+  const headerSize = readUInt32LE(dibBuffer, 0);
+
+  if (headerSize <= 0 || headerSize > dibBuffer.length) {
+    return null;
+  }
+
+  const bitCount = dibBuffer.length >= 16 ? dibBuffer.readUInt16LE(14) : 0;
+  const colorsUsed = dibBuffer.length >= 40 ? readUInt32LE(dibBuffer, 32) : 0;
+  const colorTableSize = bitCount > 0 && bitCount <= 8
+    ? (colorsUsed || (1 << bitCount)) * 4
+    : 0;
+  const pixelOffset = 14 + headerSize + colorTableSize;
+  const bmpHeader = Buffer.alloc(14);
+
+  bmpHeader.write("BM", 0, "ascii");
+  bmpHeader.writeUInt32LE(14 + dibBuffer.length, 2);
+  bmpHeader.writeUInt32LE(0, 6);
+  bmpHeader.writeUInt32LE(Math.min(pixelOffset, 14 + dibBuffer.length), 10);
+
+  return Buffer.concat([bmpHeader, dibBuffer]);
+}
+
+function getLongestHexRun(value) {
+  const runs = value.match(/[\da-fA-F]{64,}/g) || [];
+
+  return runs
+    .sort((left, right) => right.length - left.length)[0] || null;
+}
+
+function sliceImageHexBySize(hex, extension) {
+  const buffer = Buffer.from(hex, "hex");
+
+  if (extension === "webp" && buffer.length >= 12) {
+    const size = buffer.readUInt32LE(4) + 8;
+    return hex.slice(0, Math.min(size, buffer.length) * 2);
+  }
+
+  if (extension === "bmp" && buffer.length >= 6) {
+    const size = buffer.readUInt32LE(2);
+    return hex.slice(0, Math.min(size || buffer.length, buffer.length) * 2);
+  }
+
+  if (extension === "ico" && buffer.length >= 6) {
+    const imageCount = buffer.readUInt16LE(4);
+    const directorySize = 6 + imageCount * 16;
+    let size = directorySize;
+
+    for (let index = 0; index < imageCount; index += 1) {
+      const entryOffset = 6 + index * 16;
+
+      if (buffer.length >= entryOffset + 16) {
+        const imageSize = buffer.readUInt32LE(entryOffset + 8);
+        const imageOffset = buffer.readUInt32LE(entryOffset + 12);
+        size = Math.max(size, imageOffset + imageSize);
+      }
+    }
+
+    return hex.slice(0, Math.min(size, buffer.length) * 2);
+  }
+
+  return hex;
+}
+
+function getRtfImagePayload(group) {
+  const compactGroup = group.replace(/\s+/g, "");
+  const signatures = [
+    { extension: "png", pattern: /89504e47[\da-fA-F]+?49454e44ae426082/i },
+    { extension: "jpg", pattern: /ffd8ff[\da-fA-F]+?ffd9/i },
+    { extension: "gif", pattern: /47494638(?:37|39)61[\da-fA-F]+/i },
+    { extension: "webp", pattern: /52494646[\da-fA-F]+/i },
+    { extension: "bmp", pattern: /424d[\da-fA-F]+/i },
+    { extension: "ico", pattern: /00000100[\da-fA-F]+/i },
+    { extension: "tif", pattern: /(?:49492a00|4d4d002a)[\da-fA-F]+/i },
+  ];
+
+  for (const signature of signatures) {
+    const match = compactGroup.match(signature.pattern);
+
+    if (match) {
+      const hex = ["webp", "bmp", "ico"].includes(signature.extension)
+        ? sliceImageHexBySize(match[0], signature.extension)
+        : match[0];
+
+      return {
+        buffer: Buffer.from(hex, "hex"),
+        extension: signature.extension,
+      };
+    }
+  }
+
+  const hexRun = getLongestHexRun(group);
+
+  if (!hexRun) {
+    return null;
+  }
+
+  if (/\\dibitmap\b/i.test(group)) {
+    const bmpBuffer = convertDibToBmp(Buffer.from(hexRun, "hex"));
+
+    return bmpBuffer ? { buffer: bmpBuffer, extension: "bmp" } : null;
+  }
+
+  if (/\\emfblip\b/i.test(group)) {
+    return {
+      buffer: Buffer.from(hexRun, "hex"),
+      extension: "emf",
+    };
+  }
+
+  if (/\\wmetafile\b/i.test(group)) {
+    return {
+      buffer: Buffer.from(hexRun, "hex"),
+      extension: "wmf",
+    };
+  }
+
+  if (/\\jpegblip\b/i.test(group)) {
+    return {
+      buffer: Buffer.from(hexRun, "hex"),
+      extension: "jpg",
+    };
+  }
+
+  if (/\\pngblip\b/i.test(group)) {
+    return {
+      buffer: Buffer.from(hexRun, "hex"),
+      extension: "png",
+    };
+  }
+
+  return {
+    buffer: Buffer.from(hexRun, "hex"),
+    extension: "bin",
+  };
 }
 
 /*
@@ -188,9 +346,13 @@ async function extractRtfQuestionImages(buffer, examId) {
   await fs.mkdir(rtfQuestionImageDir, { recursive: true });
 
   while (searchIndex < raw.length) {
-    const groupStart = raw.indexOf("{\\*\\shppict", searchIndex);
+    const shapeGroupStart = raw.indexOf("{\\*\\shppict", searchIndex);
+    const pictGroupStart = raw.indexOf("{\\pict", searchIndex);
+    const groupStart = [shapeGroupStart, pictGroupStart]
+      .filter((index) => index !== -1)
+      .sort((a, b) => a - b)[0];
 
-    if (groupStart === -1) {
+    if (groupStart === undefined) {
       break;
     }
 
@@ -201,15 +363,14 @@ async function extractRtfQuestionImages(buffer, examId) {
     }
 
     const group = raw.slice(groupStart, groupEnd);
-    const compactGroup = group.replace(/\s+/g, "");
-    const pngMatch = compactGroup.match(/89504e47[\da-fA-F]+?49454e44ae426082/);
+    const imagePayload = getRtfImagePayload(group);
     const questionNumber = getLastQuestionNumber(raw.slice(0, groupStart));
 
-    if (pngMatch && questionNumber) {
-      const fileName = `rtf-exam-${examId}-q${questionNumber}-${Date.now()}-${imageIndex}.png`;
+    if (imagePayload && questionNumber) {
+      const fileName = `rtf-exam-${examId}-q${questionNumber}-${Date.now()}-${imageIndex}.${imagePayload.extension}`;
       const filePath = path.join(rtfQuestionImageDir, fileName);
 
-      await fs.writeFile(filePath, Buffer.from(pngMatch[0], "hex"));
+      await fs.writeFile(filePath, imagePayload.buffer);
       images.push({
         questionNumber,
         imagePath: `/uploads/questions/${fileName}`,

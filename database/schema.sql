@@ -121,3 +121,74 @@ CREATE TABLE results (
     FOREIGN KEY (exam_id) REFERENCES exams(id),
   CONSTRAINT UQ_results_student_exam UNIQUE (student_id, exam_id)
 );
+
+CREATE TABLE student_sessions (
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  student_id INT NOT NULL,
+  token_id NVARCHAR(64) NOT NULL,
+  is_active BIT NOT NULL DEFAULT 1,
+  started_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  last_seen DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  ended_at DATETIME2 NULL,
+  CONSTRAINT FK_student_sessions_student
+    FOREIGN KEY (student_id) REFERENCES users(id)
+);
+
+CREATE UNIQUE INDEX UX_student_sessions_active
+ON student_sessions(student_id)
+WHERE is_active = 1;
+
+CREATE TABLE student_answer_drafts (
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  student_id INT NOT NULL,
+  exam_id INT NOT NULL,
+  question_id INT NOT NULL,
+  answer_id INT NOT NULL,
+  saved_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT FK_answer_drafts_student
+    FOREIGN KEY (student_id) REFERENCES users(id),
+  CONSTRAINT FK_answer_drafts_exam
+    FOREIGN KEY (exam_id) REFERENCES exams(id),
+  CONSTRAINT FK_answer_drafts_question
+    FOREIGN KEY (question_id) REFERENCES questions(id),
+  CONSTRAINT FK_answer_drafts_answer
+    FOREIGN KEY (answer_id) REFERENCES answers(id)
+);
+
+CREATE UNIQUE INDEX UX_student_answer_drafts
+ON student_answer_drafts(student_id, exam_id, question_id, answer_id);
+
+CREATE TABLE student_test_events (
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  student_id INT NOT NULL,
+  exam_id INT NOT NULL,
+  event_type NVARCHAR(50) NOT NULL,
+  details NVARCHAR(500) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT FK_test_events_student
+    FOREIGN KEY (student_id) REFERENCES users(id),
+  CONSTRAINT FK_test_events_exam
+    FOREIGN KEY (exam_id) REFERENCES exams(id)
+);
+
+CREATE TABLE student_test_locks (
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  student_id INT NOT NULL,
+  exam_id INT NOT NULL,
+  event_type NVARCHAR(50) NOT NULL,
+  details NVARCHAR(500) NULL,
+  is_active BIT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  released_at DATETIME2 NULL,
+  released_by INT NULL,
+  CONSTRAINT FK_test_locks_student
+    FOREIGN KEY (student_id) REFERENCES users(id),
+  CONSTRAINT FK_test_locks_exam
+    FOREIGN KEY (exam_id) REFERENCES exams(id),
+  CONSTRAINT FK_test_locks_released_by
+    FOREIGN KEY (released_by) REFERENCES users(id)
+);
+
+CREATE UNIQUE INDEX UX_student_test_locks_active
+ON student_test_locks(student_id, exam_id)
+WHERE is_active = 1;
