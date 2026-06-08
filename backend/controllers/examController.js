@@ -8,6 +8,7 @@ const { getPool, sql } = require("../db");
 const { isAdminUser } = require("../middleware/authMiddleware");
 const { saveQuestionImage } = require("../services/fileStorage");
 const { TextDecoder } = require("util");
+const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
 
@@ -46,6 +47,80 @@ async function deleteQuestionImageFiles(imagePaths) {
       }
     }
   }));
+}
+
+function normalizeQuestionImages(questionData) {
+  const images = Array.isArray(questionData.images) ? questionData.images : [];
+  const normalized = images
+    .map((image) => ({
+      imagePath: image.imagePath || image.image_path || null,
+      imageOriginalName: image.imageOriginalName || image.image_original_name || null,
+    }))
+    .filter((image) => image.imagePath);
+
+  if (questionData.imagePath && !normalized.some((image) => image.imagePath === questionData.imagePath)) {
+    normalized.unshift({
+      imagePath: questionData.imagePath,
+      imageOriginalName: questionData.imageOriginalName || null,
+    });
+  }
+
+  return normalized;
+}
+
+async function attachQuestionImages(pool, questions) {
+  if (!questions.length) {
+    return questions;
+  }
+
+  const ids = questions.map((question) => Number(question.id)).filter(Number.isInteger);
+
+  if (!ids.length) {
+    return questions;
+  }
+
+  const result = await pool
+    .request()
+    .input("ids", sql.NVarChar(sql.MAX), ids.join(","))
+    .query(`
+      SELECT qi.id, qi.question_id, qi.image_path, qi.image_original_name, qi.sort_order
+      FROM question_images qi
+      INNER JOIN STRING_SPLIT(@ids, ',') ids ON TRY_CAST(ids.value AS INT) = qi.question_id
+      ORDER BY qi.question_id, qi.sort_order, qi.id
+    `);
+  const imagesByQuestion = new Map();
+
+  result.recordset.forEach((image) => {
+    const key = Number(image.question_id);
+
+    if (!imagesByQuestion.has(key)) {
+      imagesByQuestion.set(key, []);
+    }
+
+    imagesByQuestion.get(key).push({
+      id: image.id,
+      image_path: image.image_path,
+      image_original_name: image.image_original_name,
+      sort_order: image.sort_order,
+    });
+  });
+
+  questions.forEach((question) => {
+    const images = imagesByQuestion.get(Number(question.id)) || [];
+
+    if (!images.length && question.image_path) {
+      images.push({
+        id: null,
+        image_path: question.image_path,
+        image_original_name: question.image_original_name,
+        sort_order: 1,
+      });
+    }
+
+    question.images = images;
+  });
+
+  return questions;
 }
 
 /*
@@ -305,7 +380,6 @@ function getRtfImagePayload(group) {
     { extension: "gif", pattern: /47494638(?:37|39)61[\da-fA-F]+/i },
     { extension: "webp", pattern: /52494646[\da-fA-F]+/i },
     { extension: "bmp", pattern: /424d[\da-fA-F]+/i },
-    { extension: "ico", pattern: /00000100[\da-fA-F]+/i },
     { extension: "tif", pattern: /(?:49492a00|4d4d002a)[\da-fA-F]+/i },
   ];
 
@@ -313,7 +387,7 @@ function getRtfImagePayload(group) {
     const match = compactGroup.match(signature.pattern);
 
     if (match) {
-      const hex = ["webp", "bmp", "ico"].includes(signature.extension)
+      const hex = ["webp", "bmp"].includes(signature.extension)
         ? sliceImageHexBySize(match[0], signature.extension)
         : match[0];
 
@@ -364,10 +438,7 @@ function getRtfImagePayload(group) {
     };
   }
 
-  return {
-    buffer: Buffer.from(hexRun, "hex"),
-    extension: "bin",
-  };
+  return null;
 }
 
 /*
@@ -379,6 +450,7 @@ function getRtfImagePayload(group) {
 async function extractRtfQuestionImages(buffer, examId) {
   const raw = decodeRtfBuffer(buffer);
   const images = [];
+  const seenByQuestion = new Map();
   let searchIndex = 0;
   let imageIndex = 1;
 
@@ -406,6 +478,21 @@ async function extractRtfQuestionImages(buffer, examId) {
     const questionNumber = getLastQuestionNumber(raw.slice(0, groupStart));
 
     if (imagePayload && questionNumber) {
+      const imageHash = crypto
+        .createHash("sha1")
+        .update(imagePayload.buffer)
+        .digest("hex");
+
+      if (!seenByQuestion.has(questionNumber)) {
+        seenByQuestion.set(questionNumber, new Set());
+      }
+
+      if (seenByQuestion.get(questionNumber).has(imageHash)) {
+        searchIndex = groupEnd;
+        continue;
+      }
+
+      seenByQuestion.get(questionNumber).add(imageHash);
       const fileName = `rtf-exam-${examId}-q${questionNumber}-${Date.now()}-${imageIndex}.${imagePayload.extension}`;
       const filePath = path.join(rtfQuestionImageDir, fileName);
 
@@ -698,14 +785,16 @@ async function insertQuestion(transaction, variantId, questionData) {
     .map(Number)
     .filter((index) => answerEntries.some((answer) => answer.index === index));
   const questionType = correctAnswerIndexes.length === 1 ? "single_choice" : "multiple_choice";
+  const questionImages = normalizeQuestionImages(questionData);
+  const primaryImage = questionImages[0] || {};
   const questionRequest = new sql.Request(transaction);
   const questionResult = await questionRequest
     .input("variantId", sql.Int, variantId)
     .input("questionText", sql.NVarChar(sql.MAX), questionData.questionText.trim())
     .input("points", sql.Decimal(5, 2), Number(questionData.points) || 1)
     .input("questionType", sql.NVarChar(30), questionType)
-    .input("imagePath", sql.NVarChar(2048), questionData.imagePath || null)
-    .input("imageOriginalName", sql.NVarChar(255), questionData.imageOriginalName || null)
+    .input("imagePath", sql.NVarChar(2048), primaryImage.imagePath || null)
+    .input("imageOriginalName", sql.NVarChar(255), primaryImage.imageOriginalName || null)
     .query(`
       INSERT INTO questions (
         variant_id,
@@ -727,6 +816,19 @@ async function insertQuestion(transaction, variantId, questionData) {
     `);
 
   const questionId = Number(questionResult.recordset[0].id);
+
+  for (let index = 0; index < questionImages.length; index += 1) {
+    const image = questionImages[index];
+    await new sql.Request(transaction)
+      .input("questionId", sql.Int, questionId)
+      .input("imagePath", sql.NVarChar(2048), image.imagePath)
+      .input("imageOriginalName", sql.NVarChar(255), image.imageOriginalName || null)
+      .input("sortOrder", sql.Int, index + 1)
+      .query(`
+        INSERT INTO question_images (question_id, image_path, image_original_name, sort_order)
+        VALUES (@questionId, @imagePath, @imageOriginalName, @sortOrder)
+      `);
+  }
 
   for (const answer of answerEntries) {
     const answerRequest = new sql.Request(transaction);
@@ -773,6 +875,9 @@ async function listSubjects(req, res) {
           ORDER BY full_name
         `)
       : { recordset: [] };
+
+    const questions = [...questionsMap.values()];
+    await attachQuestionImages(pool, questions);
 
     res.json({
       subjects: result.recordset,
@@ -1056,6 +1161,14 @@ async function deleteExamData(transaction, examId) {
       INNER JOIN exam_variants v ON v.id = q.variant_id
       WHERE v.exam_id = @examId
         AND q.image_path IS NOT NULL
+
+      UNION
+
+      SELECT qi.image_path
+      FROM question_images qi
+      INNER JOIN questions q ON q.id = qi.question_id
+      INNER JOIN exam_variants v ON v.id = q.variant_id
+      WHERE v.exam_id = @examId
     `);
   const imagePaths = imageResult.recordset.map((row) => row.image_path);
 
@@ -1089,6 +1202,16 @@ async function deleteExamData(transaction, examId) {
       DELETE a
       FROM answers a
       INNER JOIN questions q ON q.id = a.question_id
+      INNER JOIN exam_variants v ON v.id = q.variant_id
+      WHERE v.exam_id = @examId
+    `);
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
+    .query(`
+      DELETE qi
+      FROM question_images qi
+      INNER JOIN questions q ON q.id = qi.question_id
       INNER JOIN exam_variants v ON v.id = q.variant_id
       WHERE v.exam_id = @examId
     `);
@@ -1449,10 +1572,16 @@ async function listVariants(req, res) {
       }
     });
 
-    const variants = variantsResult.recordset.map((variant) => ({
-      ...variant,
-      questions: [...(questionsByVariant.get(String(variant.id)) || new Map()).values()],
-    }));
+    const variants = [];
+
+    for (const variant of variantsResult.recordset) {
+      const questions = [...(questionsByVariant.get(String(variant.id)) || new Map()).values()];
+      await attachQuestionImages(pool, questions);
+      variants.push({
+        ...variant,
+        questions,
+      });
+    }
 
     res.json({
       variants,
@@ -1561,6 +1690,13 @@ async function deleteVariant(req, res) {
         FROM questions
         WHERE variant_id = @variantId
           AND image_path IS NOT NULL
+
+        UNION
+
+        SELECT qi.image_path
+        FROM question_images qi
+        INNER JOIN questions q ON q.id = qi.question_id
+        WHERE q.variant_id = @variantId
       `);
     const imagePathsToDelete = imageResult.recordset.map((row) => row.image_path);
 
@@ -1636,6 +1772,15 @@ async function deleteVariant(req, res) {
           DELETE a
           FROM answers a
           INNER JOIN questions q ON q.id = a.question_id
+          WHERE q.variant_id = @variantId
+        `);
+
+      await new sql.Request(transaction)
+        .input("variantId", sql.Int, variantId)
+        .query(`
+          DELETE qi
+          FROM question_images qi
+          INNER JOIN questions q ON q.id = qi.question_id
           WHERE q.variant_id = @variantId
         `);
 
@@ -1765,6 +1910,12 @@ async function createQuestion(req, res) {
           points: Number(points) || 1,
           image_path: imagePath,
           image_original_name: imageOriginalName,
+          images: imagePath ? [{
+            id: null,
+            image_path: imagePath,
+            image_original_name: imageOriginalName,
+            sort_order: 1,
+          }] : [],
         },
       });
     } catch (error) {
@@ -1936,7 +2087,7 @@ async function getResultDetails(req, res) {
         variant_name: first.variant_name,
         row_number: first.row_number,
       },
-      questions: [...questionsMap.values()],
+      questions,
       events: eventsResult.recordset,
     });
   } catch (error) {
@@ -2518,9 +2669,12 @@ async function importRtf(req, res) {
       parsedVariants.forEach((variant) => {
         const question = variant.questions[image.questionNumber - 1];
 
-        if (question && !question.imagePath) {
-          question.imagePath = image.imagePath;
-          question.imageOriginalName = image.imageOriginalName;
+        if (question) {
+          question.images = question.images || [];
+          question.images.push({
+            imagePath: image.imagePath,
+            imageOriginalName: image.imageOriginalName,
+          });
         }
       });
     });

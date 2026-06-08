@@ -307,6 +307,22 @@ async function ensureSchema() {
     `);
 
     await pool.request().query(`
+      IF OBJECT_ID('question_images', 'U') IS NULL
+      BEGIN
+        CREATE TABLE question_images (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          question_id INT NOT NULL,
+          image_path NVARCHAR(2048) NOT NULL,
+          image_original_name NVARCHAR(255) NULL,
+          sort_order INT NOT NULL DEFAULT 1,
+          created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT FK_question_images_question
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        )
+      END
+    `);
+
+    await pool.request().query(`
       IF OBJECT_ID('student_exam_assignments', 'U') IS NULL
       BEGIN
         CREATE TABLE student_exam_assignments (

@@ -101,6 +101,25 @@ function hydrateMenuIcons(root = document) {
   });
 }
 
+function getQuestionImages(question) {
+  if (Array.isArray(question.images) && question.images.length > 0) {
+    return question.images;
+  }
+
+  return question.image_path
+    ? [{
+      image_path: question.image_path,
+      image_original_name: question.image_original_name,
+    }]
+    : [];
+}
+
+function renderQuestionImages(question) {
+  return getQuestionImages(question).map((image) => `
+    <img class="question-image" src="${escapeHtml(getFileUrl(image.image_path))}" alt="${escapeHtml(image.image_original_name || "Imagine intrebare")}">
+  `).join("");
+}
+
 function formatExamDate(value) {
   if (!value) {
     return "-";
@@ -537,9 +556,7 @@ function renderTestForm(test) {
           <strong>${questionIndex + 1}. ${escapeHtml(question.question_text)}</strong>
           <span class="muted-note">${escapeHtml(question.points)} puncte</span>
         </div>
-        ${question.image_path ? `
-          <img class="question-image" src="${escapeHtml(getFileUrl(question.image_path))}" alt="${escapeHtml(question.image_original_name || "Imagine intrebare")}">
-        ` : ""}
+        ${renderQuestionImages(question)}
         <div class="test-answer-grid">
           ${question.answers.map((answer) => `
             <button

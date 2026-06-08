@@ -6,6 +6,61 @@
 // Controleaza ce vede studentul: materii, examene, testul activ, autosave si rezultate.
 const { getPool, sql } = require("../db");
 
+async function attachQuestionImages(pool, questions) {
+  if (!questions.length) {
+    return questions;
+  }
+
+  const ids = questions.map((question) => Number(question.id)).filter(Number.isInteger);
+
+  if (!ids.length) {
+    return questions;
+  }
+
+  const result = await pool
+    .request()
+    .input("ids", sql.NVarChar(sql.MAX), ids.join(","))
+    .query(`
+      SELECT qi.id, qi.question_id, qi.image_path, qi.image_original_name, qi.sort_order
+      FROM question_images qi
+      INNER JOIN STRING_SPLIT(@ids, ',') ids ON TRY_CAST(ids.value AS INT) = qi.question_id
+      ORDER BY qi.question_id, qi.sort_order, qi.id
+    `);
+  const imagesByQuestion = new Map();
+
+  result.recordset.forEach((image) => {
+    const key = Number(image.question_id);
+
+    if (!imagesByQuestion.has(key)) {
+      imagesByQuestion.set(key, []);
+    }
+
+    imagesByQuestion.get(key).push({
+      id: image.id,
+      image_path: image.image_path,
+      image_original_name: image.image_original_name,
+      sort_order: image.sort_order,
+    });
+  });
+
+  questions.forEach((question) => {
+    const images = imagesByQuestion.get(Number(question.id)) || [];
+
+    if (!images.length && question.image_path) {
+      images.push({
+        id: null,
+        image_path: question.image_path,
+        image_original_name: question.image_original_name,
+        sort_order: 1,
+      });
+    }
+
+    question.images = images;
+  });
+
+  return questions;
+}
+
 /*
 ----------------------------
       Asignare varianta student
@@ -343,6 +398,9 @@ async function listStudentExams(req, res) {
       });
     });
 
+    const questions = [...questionsMap.values()];
+    await attachQuestionImages(pool, questions);
+
     res.json({
       subjects: subjectsResult.recordset,
       exams: result.recordset.map((exam) => ({
@@ -566,6 +624,9 @@ async function getStudentTest(req, res) {
       }
     });
 
+    const questions = [...questionsMap.values()];
+    await attachQuestionImages(pool, questions);
+
     const draftAnswersByQuestion = await getDraftAnswersByQuestion(pool, req.user.id, examId);
     const draftAnswers = [...draftAnswersByQuestion.entries()].map(([questionId, answerIds]) => ({
       questionId,
@@ -575,7 +636,7 @@ async function getStudentTest(req, res) {
     res.json({
       exam,
       variant: variantResult.recordset[0],
-      questions: [...questionsMap.values()],
+      questions,
       draftAnswers,
     });
   } catch (error) {
@@ -1127,7 +1188,7 @@ async function getStudentResultDetails(req, res) {
         variant_name: first.variant_name,
         row_number: first.row_number,
       },
-      questions: [...questionsMap.values()],
+      questions,
     });
   } catch (error) {
     res.status(500).json({

@@ -409,6 +409,25 @@ function getFileUrl(path) {
   return `${API_FILE_BASE_URL}${path}`;
 }
 
+function getQuestionImages(question) {
+  if (Array.isArray(question.images) && question.images.length > 0) {
+    return question.images;
+  }
+
+  return question.image_path
+    ? [{
+      image_path: question.image_path,
+      image_original_name: question.image_original_name,
+    }]
+    : [];
+}
+
+function renderQuestionImages(question) {
+  return getQuestionImages(question).map((image) => `
+    <img class="question-image" src="${escapeHtml(getFileUrl(image.image_path))}" alt="${escapeHtml(image.image_original_name || "Imagine intrebare")}">
+  `).join("");
+}
+
 function getStatusLabel(status) {
   const labels = {
     future: "Viitor",
@@ -1093,9 +1112,7 @@ function renderResultDetails(data) {
           `;
         })()}
       </div>
-      ${question.image_path ? `
-        <img class="question-image" src="${escapeHtml(getFileUrl(question.image_path))}" alt="${escapeHtml(question.image_original_name || "Imagine intrebare")}">
-      ` : ""}
+      ${renderQuestionImages(question)}
       <div class="review-answer-grid">
         ${question.answers.map((answer, answerIndex) => {
           const reviewScore = getQuestionReviewScore(question);
@@ -1169,9 +1186,7 @@ function renderVariantsList() {
           <div class="question-item">
             <strong>${escapeHtml(questionIndex + 1)}. ${escapeHtml(question.question_text)}</strong>
             <span class="muted-note">(${escapeHtml(question.points)} puncte)</span>
-            ${question.image_path ? `
-              <img class="question-image" src="${escapeHtml(getFileUrl(question.image_path))}" alt="${escapeHtml(question.image_original_name || "Imagine intrebare")}">
-            ` : ""}
+            ${renderQuestionImages(question)}
             <ol class="answer-list">
               ${question.answers.map((answer) => `
                 <li class="${answer.is_correct ? "correct-answer" : ""}">

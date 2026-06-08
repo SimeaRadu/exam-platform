@@ -73,6 +73,17 @@ CREATE TABLE answers (
     FOREIGN KEY (question_id) REFERENCES questions(id)
 );
 
+CREATE TABLE question_images (
+  id INT IDENTITY(1,1) PRIMARY KEY,
+  question_id INT NOT NULL,
+  image_path NVARCHAR(2048) NOT NULL,
+  image_original_name NVARCHAR(255) NULL,
+  sort_order INT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT FK_question_images_question
+    FOREIGN KEY (question_id) REFERENCES questions(id)
+);
+
 CREATE TABLE student_exam_assignments (
   id INT IDENTITY(1,1) PRIMARY KEY,
   student_id INT NOT NULL,
