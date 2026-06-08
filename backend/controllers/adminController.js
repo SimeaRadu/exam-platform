@@ -185,7 +185,7 @@ async function createUser(req, res) {
     }
 
     const pool = await getPool();
-    const isAdminCode = uniqueCode === process.env.ADMIN_UNIQUE_CODE;
+    const isAdminCode = isAdminUser({ unique_code: uniqueCode });
 
     if (!isAdminUser(req.user) && isAdminCode) {
       return res.status(403).json({
@@ -535,7 +535,7 @@ async function deleteUser(req, res) {
         });
       }
 
-      if (targetUser.unique_code === process.env.ADMIN_UNIQUE_CODE) {
+      if (isAdminUser(targetUser)) {
         await transaction.rollback();
         return res.status(403).json({
           message: "Contul principal de admin nu poate fi sters.",

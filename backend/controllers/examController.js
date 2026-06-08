@@ -883,9 +883,6 @@ async function listSubjects(req, res) {
         `)
       : { recordset: [] };
 
-    const questions = [...questionsMap.values()];
-    await attachQuestionImages(pool, questions);
-
     res.json({
       subjects: result.recordset,
       professors: professors.recordset,
