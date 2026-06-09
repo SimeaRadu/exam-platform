@@ -2004,11 +2004,7 @@ async function getResultDetails(req, res) {
         SELECT r.id AS result_id, r.student_id, r.score, r.max_score, r.grade, r.submitted_at,
                u.full_name AS student_name, u.email AS student_email,
                e.id AS exam_id, e.title AS exam_title, s.name AS subject_name,
-               v.variant_name, v.row_number,
-               q.id AS question_id, q.question_text, q.points,
-               q.image_path, q.image_original_name,
-               ans.id AS answer_id, ans.answer_text, ans.is_correct,
-               CASE WHEN sa.id IS NULL THEN 0 ELSE 1 END AS is_selected
+               v.id AS variant_id, v.variant_name, v.row_number
         FROM results r
         INNER JOIN users u ON u.id = r.student_id
         INNER JOIN exams e ON e.id = r.exam_id
@@ -2016,16 +2012,8 @@ async function getResultDetails(req, res) {
         LEFT JOIN student_exam_assignments sea
           ON sea.student_id = r.student_id AND sea.exam_id = r.exam_id
         LEFT JOIN exam_variants v ON v.id = sea.variant_id
-        INNER JOIN questions q ON q.variant_id = sea.variant_id
-        LEFT JOIN answers ans ON ans.question_id = q.id
-        LEFT JOIN student_answers sa
-          ON sa.student_id = r.student_id
-          AND sa.exam_id = r.exam_id
-          AND sa.question_id = q.id
-          AND sa.answer_id = ans.id
         WHERE r.id = @resultId
           AND (@isAdmin = 1 OR s.professor_id = @professorId)
-        ORDER BY q.id, ans.id
       `);
 
     if (result.recordset.length === 0) {
@@ -2047,7 +2035,29 @@ async function getResultDetails(req, res) {
       `);
     const questionsMap = new Map();
 
-    result.recordset.forEach((row) => {
+    if (first.variant_id) {
+      const questionsResult = await pool
+        .request()
+        .input("studentId", sql.Int, Number(first.student_id))
+        .input("examId", sql.Int, Number(first.exam_id))
+        .input("variantId", sql.Int, Number(first.variant_id))
+        .query(`
+          SELECT q.id AS question_id, q.question_text, q.points,
+                 q.image_path, q.image_original_name,
+                 ans.id AS answer_id, ans.answer_text, ans.is_correct,
+                 CASE WHEN sa.id IS NULL THEN 0 ELSE 1 END AS is_selected
+          FROM questions q
+          LEFT JOIN answers ans ON ans.question_id = q.id
+          LEFT JOIN student_answers sa
+            ON sa.student_id = @studentId
+            AND sa.exam_id = @examId
+            AND sa.question_id = q.id
+            AND sa.answer_id = ans.id
+          WHERE q.variant_id = @variantId
+          ORDER BY q.id, ans.id
+        `);
+
+      questionsResult.recordset.forEach((row) => {
       if (!questionsMap.has(row.question_id)) {
         questionsMap.set(row.question_id, {
           id: row.question_id,
@@ -2067,7 +2077,11 @@ async function getResultDetails(req, res) {
           is_selected: Boolean(row.is_selected),
         });
       }
-    });
+      });
+    }
+
+    const questions = [...questionsMap.values()];
+    await attachQuestionImages(pool, questions);
 
     res.json({
       result: {

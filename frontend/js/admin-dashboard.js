@@ -853,7 +853,7 @@ async function downloadArchiveRegister(examId) {
   const subjectName = exam?.subject_name || firstResult.subject_name || "materie";
   const examTitle = exam?.title || firstResult.exam_title || "examen";
   const rows = [
-    ["Nume student", "Grupa", "Materie", "Examen", "Varianta", "Rand", "Nota"],
+    ["Nume student", "Grupa", "Materie", "Examen", "Varianta", "Rand", "Punctaj", "Nota"],
     ...results.map((result) => [
       result.student_name,
       result.matriculation_number || "-",
@@ -861,6 +861,7 @@ async function downloadArchiveRegister(examId) {
       result.exam_title,
       result.variant_name || "-",
       result.row_number || "-",
+      `${result.score} / ${result.max_score}`,
       isPlagiarismResult(result) ? "Plagiat" : result.grade,
     ]),
   ];
@@ -1095,7 +1096,7 @@ function renderResultDetails(data) {
         </ol>
       </article>
     ` : ""}
-    ${data.questions.map((question, index) => `
+    ${(data.questions || []).length ? data.questions.map((question, index) => `
     <article class="review-question-card">
       <div class="review-question-header">
         <div>
@@ -1133,7 +1134,12 @@ function renderResultDetails(data) {
         }).join("")}
       </div>
     </article>
-  `).join("")}
+  `).join("") : `
+    <article class="review-question-card">
+      <h3>Nu exista intrebari disponibile pentru acest rezultat.</h3>
+      <p class="muted-note">Rezultatul poate fi marcat ca plagiat sau varianta poate sa nu mai existe.</p>
+    </article>
+  `}
   `;
 }
 
