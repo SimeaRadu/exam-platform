@@ -398,9 +398,6 @@ async function listStudentExams(req, res) {
       });
     });
 
-    const questions = [...questionsMap.values()];
-    await attachQuestionImages(pool, questions);
-
     res.json({
       subjects: subjectsResult.recordset,
       exams: result.recordset.map((exam) => ({
@@ -1174,6 +1171,9 @@ async function getStudentResultDetails(req, res) {
         });
       }
     });
+
+    const questions = [...questionsMap.values()];
+    await attachQuestionImages(pool, questions);
 
     res.json({
       result: {
