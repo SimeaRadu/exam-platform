@@ -99,7 +99,6 @@ let allResults = [];
 let selectedResultsExamId = null;
 let selectedResultDetailsId = null;
 let canManageAccounts = true;
-let permissionsLoaded = false;
 let activeTestLocks = [];
 
 if (user) {
@@ -119,27 +118,7 @@ function showAdminMenu() {
   professorName.textContent = "Meniu principal";
 }
 
-async function ensurePermissionsLoaded() {
-  if (permissionsLoaded) {
-    return;
-  }
-
-  try {
-    const data = await apiRequest("/admin/users");
-    canManageAccounts = Boolean(data.canManageUsers);
-    canManageUsers = Boolean(data.canManageAllUsers);
-    permissionsLoaded = true;
-    updateUserManagementVisibility();
-  } catch (error) {
-    permissionsLoaded = true;
-  }
-}
-
-async function showDashboardSection(sectionId) {
-  if (sectionId !== "usersSection") {
-    await ensurePermissionsLoaded();
-  }
-
+function showDashboardSection(sectionId) {
   activeSectionId = sectionId;
   adminMenuSection.classList.add("hidden");
   dashboardSections.forEach((section) => {
@@ -358,7 +337,6 @@ async function loadUsers(options = {}) {
     const data = await apiRequest("/admin/users");
     canManageAccounts = Boolean(data.canManageUsers);
     canManageUsers = Boolean(data.canManageAllUsers);
-    permissionsLoaded = true;
     updateUserManagementVisibility();
     renderUsers(data.users);
   } catch (error) {
@@ -469,8 +447,7 @@ function statusButton(exam, status, label) {
 
 function canManageExam(exam) {
   return canManageUsers
-    || String(exam.professor_id) === String(user.id)
-    || String(exam.created_by) === String(user.id);
+    || String(exam.professor_id) === String(user.id);
 }
 
 function generateUniqueCode() {

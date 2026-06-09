@@ -864,14 +864,7 @@ async function listSubjects(req, res) {
                s.info_text, s.rules_text, s.created_at
         FROM subjects s
         LEFT JOIN users u ON u.id = s.professor_id
-        WHERE @isAdmin = 1
-           OR s.professor_id = @professorId
-           OR EXISTS (
-             SELECT 1
-             FROM exams e
-             WHERE e.subject_id = s.id
-               AND e.created_by = @professorId
-           )
+        WHERE @isAdmin = 1 OR s.professor_id = @professorId
         ORDER BY s.name
       `);
     const professors = admin
@@ -1261,7 +1254,7 @@ async function listExams(req, res) {
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
         LEFT JOIN users p ON p.id = s.professor_id
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId
+        WHERE @isAdmin = 1 OR s.professor_id = @professorId
         ORDER BY
           CASE
             WHEN e.status IN ('future', 'active') THEN 0
@@ -1489,7 +1482,7 @@ async function canManageExam(pool, req, examId) {
       FROM exams e
       INNER JOIN subjects s ON s.id = e.subject_id
       WHERE e.id = @examId
-        AND (s.professor_id = @professorId OR e.created_by = @professorId)
+        AND s.professor_id = @professorId
     `);
 
   return result.recordset.length > 0;
@@ -1969,7 +1962,7 @@ async function listResults(req, res) {
           WHERE ste.student_id = r.student_id
             AND ste.exam_id = r.exam_id
         ) events
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId
+        WHERE @isAdmin = 1 OR s.professor_id = @professorId
         ORDER BY r.submitted_at DESC
       `);
 
@@ -2127,7 +2120,7 @@ async function listActiveTestLocks(req, res) {
         INNER JOIN exams e ON e.id = l.exam_id
         INNER JOIN subjects s ON s.id = e.subject_id
         WHERE l.is_active = 1
-          AND (@isAdmin = 1 OR s.professor_id = @professorId OR e.created_by = @professorId)
+          AND (@isAdmin = 1 OR s.professor_id = @professorId)
         ORDER BY l.created_at DESC
       `);
 
