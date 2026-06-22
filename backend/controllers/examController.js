@@ -2370,7 +2370,7 @@ async function releaseTestLock(req, res) {
       .request()
       .input("lockId", sql.Int, lockId)
       .query(`
-        SELECT TOP 1 id, exam_id
+        SELECT TOP 1 id, student_id, exam_id
         FROM student_test_locks
         WHERE id = @lockId AND is_active = 1
       `);
@@ -2382,6 +2382,7 @@ async function releaseTestLock(req, res) {
     }
 
     const examId = Number(lockResult.recordset[0].exam_id);
+    const studentId = Number(lockResult.recordset[0].student_id);
 
     if (!(await canManageExam(pool, req, examId))) {
       return res.status(403).json({
@@ -2389,17 +2390,36 @@ async function releaseTestLock(req, res) {
       });
     }
 
-    await pool
-      .request()
-      .input("lockId", sql.Int, lockId)
-      .input("releasedBy", sql.Int, req.user.id)
-      .query(`
-        UPDATE student_test_locks
-        SET is_active = 0,
-            released_at = SYSUTCDATETIME(),
-            released_by = @releasedBy
-        WHERE id = @lockId
-      `);
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      await new sql.Request(transaction)
+        .input("studentId", sql.Int, studentId)
+        .input("examId", sql.Int, examId)
+        .query(`
+          UPDATE student_answer_drafts
+          SET is_locked = 1
+          WHERE student_id = @studentId
+            AND exam_id = @examId
+        `);
+
+      await new sql.Request(transaction)
+        .input("lockId", sql.Int, lockId)
+        .input("releasedBy", sql.Int, req.user.id)
+        .query(`
+          UPDATE student_test_locks
+          SET is_active = 0,
+              released_at = SYSUTCDATETIME(),
+              released_by = @releasedBy
+          WHERE id = @lockId
+        `);
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
 
     res.json({
       message: "Studentul poate continua testul.",
@@ -2856,8 +2876,14 @@ async function approveExamRestart(req, res) {
             DELETE FROM student_answer_drafts
             WHERE exam_id = @examId AND student_id = @studentId;
 
-            INSERT INTO student_answer_drafts (student_id, exam_id, question_id, answer_id)
-            SELECT DISTINCT student_id, exam_id, question_id, answer_id
+            INSERT INTO student_answer_drafts (
+              student_id,
+              exam_id,
+              question_id,
+              answer_id,
+              is_locked
+            )
+            SELECT DISTINCT student_id, exam_id, question_id, answer_id, 1
             FROM student_answers
             WHERE exam_id = @examId
               AND student_id = @studentId

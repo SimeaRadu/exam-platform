@@ -708,6 +708,9 @@ function renderTestForm(test) {
   solveTestMeta.textContent = "";
   selectedAnswersByQuestion = new Map();
   const rowToneClass = getRowToneClass(test.variant?.row_number);
+  const lockedQuestionIds = new Set(
+    (test.lockedQuestionIds || []).map((questionId) => Number(questionId)),
+  );
 
   if (!test.questions.length) {
     solveTestForm.innerHTML = "<p>Acest test nu are intrebari.</p>";
@@ -719,10 +722,13 @@ function renderTestForm(test) {
       Raspunsuri selectate: <strong id="selectedAnswersCount">0</strong>
     </p>
     ${test.questions.map((question, questionIndex) => `
-      <section class="test-question ${rowToneClass}" data-question-id="${question.id}">
+      <section class="test-question ${rowToneClass} ${lockedQuestionIds.has(Number(question.id)) ? "is-resume-locked" : ""}" data-question-id="${question.id}">
         <div class="question-title">
           <strong>${questionIndex + 1}. ${escapeHtml(question.question_text)}</strong>
-          <span class="muted-note">${escapeHtml(formatPoints(question.points))} puncte</span>
+          <span class="question-meta">
+            ${lockedQuestionIds.has(Number(question.id)) ? '<span class="resume-locked-label">Raspuns salvat</span>' : ""}
+            <span class="muted-note">${escapeHtml(formatPoints(question.points))} puncte</span>
+          </span>
         </div>
         ${renderQuestionImages(question)}
         <div class="test-answer-grid">
@@ -732,7 +738,9 @@ function renderTestForm(test) {
               type="button"
               data-question-id="${question.id}"
               data-answer-id="${answer.id}"
+              data-resume-locked="${lockedQuestionIds.has(Number(question.id)) ? "true" : "false"}"
               aria-pressed="false"
+              ${lockedQuestionIds.has(Number(question.id)) ? "disabled" : ""}
             >
               <span class="check-mark" aria-hidden="true">*</span>
               <span>${escapeHtml(answer.answer_text)}</span>
@@ -754,6 +762,38 @@ function renderTestForm(test) {
         card.classList.add("is-selected");
         syncSelectedAnswer(card);
       }
+    });
+  });
+}
+
+function applyResumeLockedQuestions(questionIds = []) {
+  if (!activeTest) {
+    return;
+  }
+
+  const lockedQuestionIds = new Set(questionIds.map((questionId) => Number(questionId)));
+  activeTest.lockedQuestionIds = [...lockedQuestionIds];
+
+  solveTestForm.querySelectorAll(".test-question[data-question-id]").forEach((questionCard) => {
+    const questionId = Number(questionCard.dataset.questionId);
+    const isLocked = lockedQuestionIds.has(questionId);
+    questionCard.classList.toggle("is-resume-locked", isLocked);
+
+    let label = questionCard.querySelector(".resume-locked-label");
+    const meta = questionCard.querySelector(".question-meta");
+
+    if (isLocked && !label && meta) {
+      label = document.createElement("span");
+      label.className = "resume-locked-label";
+      label.textContent = "Raspuns salvat";
+      meta.prepend(label);
+    } else if (!isLocked && label) {
+      label.remove();
+    }
+
+    questionCard.querySelectorAll(".answer-option").forEach((answer) => {
+      answer.dataset.resumeLocked = isLocked ? "true" : "false";
+      answer.disabled = isLocked || serverTestLockActive || localTestLockPending;
     });
   });
 }
@@ -784,7 +824,7 @@ function setFullscreenLock(isLocked) {
   fullscreenLockOverlay.classList.toggle("hidden", !isLocked);
   document.body.classList.toggle("test-fullscreen-locked", isLocked);
   solveTestForm.querySelectorAll("button, input").forEach((element) => {
-    element.disabled = isLocked;
+    element.disabled = isLocked || element.dataset.resumeLocked === "true";
   });
 }
 
@@ -903,6 +943,7 @@ async function refreshTestLockStatus() {
 
   try {
     const data = await apiRequest(`/student/exams/${activeTest.exam.id}/lock-status`);
+    applyResumeLockedQuestions(data.lockedQuestionIds || []);
 
     if (data.completed) {
       clearTimeout(autosaveTimer);
@@ -1318,7 +1359,7 @@ solveTestForm.addEventListener("submit", async (event) => {
     isSubmittingTest = false;
     setStudentTestMode(Boolean(activeTest), activeTest?.variant?.row_number);
     solveTestForm.querySelectorAll("button, input").forEach((element) => {
-      element.disabled = false;
+      element.disabled = element.dataset.resumeLocked === "true";
     });
   }
 });

@@ -333,16 +333,61 @@ async function getDraftAnswersByQuestion(pool, studentId, examId) {
   return answersByQuestion;
 }
 
-async function saveDraftAnswers(transaction, studentId, examId, questions, answersByQuestion) {
-  await new sql.Request(transaction)
+async function getLockedDraftAnswersByQuestion(pool, studentId, examId) {
+  const draftResult = await pool
+    .request()
     .input("studentId", sql.Int, studentId)
     .input("examId", sql.Int, examId)
     .query(`
-      DELETE FROM student_answer_drafts
-      WHERE student_id = @studentId AND exam_id = @examId
+      SELECT question_id, answer_id
+      FROM student_answer_drafts
+      WHERE student_id = @studentId
+        AND exam_id = @examId
+        AND is_locked = 1
+      ORDER BY question_id, answer_id
     `);
 
+  const answersByQuestion = new Map();
+
+  draftResult.recordset.forEach((row) => {
+    const questionId = Number(row.question_id);
+    const answerId = Number(row.answer_id);
+
+    if (!answersByQuestion.has(questionId)) {
+      answersByQuestion.set(questionId, new Set());
+    }
+
+    answersByQuestion.get(questionId).add(answerId);
+  });
+
+  return answersByQuestion;
+}
+
+async function saveDraftAnswers(transaction, studentId, examId, questions, answersByQuestion) {
+  const lockedResult = await new sql.Request(transaction)
+    .input("studentId", sql.Int, studentId)
+    .input("examId", sql.Int, examId)
+    .query(`
+      SELECT DISTINCT question_id
+      FROM student_answer_drafts
+      WHERE student_id = @studentId
+        AND exam_id = @examId
+        AND is_locked = 1;
+
+      DELETE FROM student_answer_drafts
+      WHERE student_id = @studentId
+        AND exam_id = @examId
+        AND is_locked = 0;
+    `);
+  const lockedQuestionIds = new Set(
+    lockedResult.recordset.map((row) => Number(row.question_id)),
+  );
+
   for (const question of questions.values()) {
+    if (lockedQuestionIds.has(Number(question.id))) {
+      continue;
+    }
+
     const selectedAnswerIds = [...(answersByQuestion.get(question.id) || new Set())]
       .filter((answerId) => question.allAnswerIds.has(answerId));
 
@@ -353,8 +398,14 @@ async function saveDraftAnswers(transaction, studentId, examId, questions, answe
         .input("questionId", sql.Int, question.id)
         .input("answerId", sql.Int, answerId)
         .query(`
-          INSERT INTO student_answer_drafts (student_id, exam_id, question_id, answer_id)
-          VALUES (@studentId, @examId, @questionId, @answerId)
+          INSERT INTO student_answer_drafts (
+            student_id,
+            exam_id,
+            question_id,
+            answer_id,
+            is_locked
+          )
+          VALUES (@studentId, @examId, @questionId, @answerId, 0)
         `);
     }
   }
@@ -785,6 +836,11 @@ async function getStudentTest(req, res) {
     await attachQuestionImages(pool, questions);
 
     const draftAnswersByQuestion = await getDraftAnswersByQuestion(pool, req.user.id, examId);
+    const lockedDraftAnswersByQuestion = await getLockedDraftAnswersByQuestion(
+      pool,
+      req.user.id,
+      examId,
+    );
     const draftAnswers = [...draftAnswersByQuestion.entries()].map(([questionId, answerIds]) => ({
       questionId,
       answerIds: [...answerIds],
@@ -795,6 +851,7 @@ async function getStudentTest(req, res) {
       variant: variantResult.recordset[0],
       questions,
       draftAnswers,
+      lockedQuestionIds: [...lockedDraftAnswersByQuestion.keys()],
     });
   } catch (error) {
     res.status(500).json({
@@ -919,10 +976,19 @@ async function submitStudentTest(req, res) {
 
     const questions = await getVariantQuestionsForScoring(pool, assignment.variant_id);
     let answersByQuestion = normalizeSubmittedAnswers(req.body);
+    const lockedAnswersByQuestion = await getLockedDraftAnswersByQuestion(
+      pool,
+      req.user.id,
+      examId,
+    );
 
     if ([...answersByQuestion.values()].every((answerIds) => answerIds.size === 0)) {
       answersByQuestion = await getDraftAnswersByQuestion(pool, req.user.id, examId);
     }
+
+    lockedAnswersByQuestion.forEach((answerIds, questionId) => {
+      answersByQuestion.set(questionId, new Set(answerIds));
+    });
 
     const selectedValidAnswerCount = [...questions.values()].reduce((total, question) => {
       const selectedAnswerIds = answersByQuestion.get(question.id) || new Set();
@@ -1214,10 +1280,16 @@ async function getStudentTestLockStatus(req, res) {
         WHERE student_id = @studentId AND exam_id = @examId
       `);
     const completedResult = resultCheck.recordset[0] || null;
+    const lockedAnswersByQuestion = await getLockedDraftAnswersByQuestion(
+      pool,
+      req.user.id,
+      examId,
+    );
 
     res.json({
       locked: lockResult.recordset.length > 0,
       lock: lockResult.recordset[0] || null,
+      lockedQuestionIds: [...lockedAnswersByQuestion.keys()],
       completed: Boolean(completedResult),
       isPlagiarism: Boolean(
         completedResult
