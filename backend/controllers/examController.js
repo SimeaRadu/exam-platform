@@ -763,6 +763,38 @@ function parseRtfQuestions(text) {
   return variants.filter((variant) => variant.questions.length > 0);
 }
 
+function getRtfImportWarnings(variants) {
+  const missingCorrectAnswers = [];
+
+  variants.forEach((variant) => {
+    variant.questions.forEach((question, questionIndex) => {
+      const validAnswers = (question.answers || [])
+        .map((answer) => String(answer || "").trim())
+        .filter(Boolean);
+      const validCorrectIndexes = (question.correctAnswerIndexes || [])
+        .map(Number)
+        .filter((index) => index >= 0 && index < validAnswers.length);
+
+      if (validAnswers.length >= 2 && validCorrectIndexes.length === 0) {
+        missingCorrectAnswers.push({
+          variantName: variant.variantName,
+          rowNumber: variant.rowNumber,
+          questionNumber: questionIndex + 1,
+          questionText: question.questionText,
+        });
+      }
+    });
+  });
+
+  return missingCorrectAnswers.length
+    ? [{
+      type: "missing_correct_answers",
+      message: "Atentie: unele intrebari nu au raspuns corect marcat. Verifica steluta (*) sau marcajul CORECT in fisierul RTF inainte sa folosesti varianta la examen.",
+      questions: missingCorrectAnswers,
+    }]
+    : [];
+}
+
 /*
 ----------------------------
       Salvare intrebare
@@ -854,27 +886,19 @@ async function insertQuestion(transaction, variantId, questionData) {
 async function listSubjects(req, res) {
   try {
     const pool = await getPool();
-    const admin = isAdminUser(req.user);
-    const result = await pool
-      .request()
-      .input("professorId", sql.Int, req.user.id)
-      .input("isAdmin", sql.Bit, admin ? 1 : 0)
-      .query(`
+    const result = await pool.request().query(`
         SELECT s.id, s.name, s.professor_id, u.full_name AS professor_name,
                s.info_text, s.rules_text, s.created_at
         FROM subjects s
         LEFT JOIN users u ON u.id = s.professor_id
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId
         ORDER BY s.name
       `);
-    const professors = admin
-      ? await pool.request().query(`
-          SELECT id, full_name, email
-          FROM users
-          WHERE role = 'professor'
-          ORDER BY full_name
-        `)
-      : { recordset: [] };
+    const professors = await pool.request().query(`
+      SELECT id, full_name, email
+      FROM users
+      WHERE role = 'professor'
+      ORDER BY full_name
+    `);
 
     res.json({
       subjects: result.recordset,
@@ -1179,6 +1203,10 @@ async function deleteExamData(transaction, examId) {
 
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
+    .query("DELETE FROM exam_restart_requests WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
     .query("DELETE FROM student_test_events WHERE exam_id = @examId");
 
   await new sql.Request(transaction)
@@ -1192,6 +1220,18 @@ async function deleteExamData(transaction, examId) {
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
     .query("DELETE FROM student_exam_assignments WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
+    .query("DELETE FROM exam_attendance WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
+    .query("DELETE FROM exam_groups WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
+    .query("DELETE FROM exam_owners WHERE exam_id = @examId");
 
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
@@ -1250,11 +1290,42 @@ async function listExams(req, res) {
       .query(`
         SELECT e.id, e.subject_id, s.name AS subject_name, s.professor_id,
                p.full_name AS subject_professor_name,
-               e.title, e.exam_date, e.status, e.created_by, e.bonus_points, e.created_at
+               e.title, e.exam_date, e.status, e.created_by, e.bonus_points, e.created_at,
+               CAST(CASE
+                 WHEN @isAdmin = 1
+                   OR s.professor_id = @professorId
+                   OR EXISTS (
+                     SELECT 1
+                     FROM exam_owners eo_manage
+                     WHERE eo_manage.exam_id = e.id AND eo_manage.professor_id = @professorId
+                   )
+                 THEN 1 ELSE 0
+               END AS BIT) AS can_manage,
+               STUFF((
+                 SELECT ', ' + eg.group_name
+                 FROM exam_groups eg
+                 WHERE eg.exam_id = e.id
+                 ORDER BY eg.group_name
+                 FOR XML PATH(''), TYPE
+               ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS group_names,
+               STUFF((
+                 SELECT ', ' + owner.full_name
+                 FROM exam_owners eo
+                 INNER JOIN users owner ON owner.id = eo.professor_id
+                 WHERE eo.exam_id = e.id
+                 ORDER BY owner.full_name
+                 FOR XML PATH(''), TYPE
+               ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS owner_names
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
         LEFT JOIN users p ON p.id = s.professor_id
-        WHERE @isAdmin = 1 OR s.professor_id = @professorId
+        WHERE @isAdmin = 1
+           OR s.professor_id = @professorId
+           OR EXISTS (
+             SELECT 1
+             FROM exam_owners eo
+             WHERE eo.exam_id = e.id AND eo.professor_id = @professorId
+           )
         ORDER BY
           CASE
             WHEN e.status IN ('future', 'active') THEN 0
@@ -1285,10 +1356,17 @@ async function listExams(req, res) {
         Creare examen
 ----------------------------
 */
-// Creeaza examenul pe materia selectata si salveaza punctele din oficiu.
+// Creeaza examenul pe materia selectata si salveaza grupele/ownerii alesi.
 async function createExam(req, res) {
   try {
-    const { subjectId, title, examDate, bonusPoints = 0 } = req.body;
+    const {
+      subjectId,
+      title,
+      examDate,
+      bonusPoints = 0,
+      groups = [],
+      ownerIds = [],
+    } = req.body;
 
     if (!subjectId || !title || !examDate) {
       return res.status(400).json({
@@ -1315,24 +1393,67 @@ async function createExam(req, res) {
       });
     }
 
-    const result = await pool
-      .request()
-      .input("subjectId", sql.Int, Number(subjectId))
-      .input("title", sql.NVarChar(150), title.trim())
-      .input("examDate", sql.DateTime, new Date(examDate))
-      .input("bonusPoints", sql.Decimal(5, 2), Number(bonusPoints) || 0)
-      .input("createdBy", sql.Int, req.user.id)
-      .query(`
-        INSERT INTO exams (subject_id, title, exam_date, status, bonus_points, created_by)
-        OUTPUT INSERTED.id, INSERTED.subject_id, INSERTED.title,
-               INSERTED.exam_date, INSERTED.status, INSERTED.bonus_points,
-               INSERTED.created_by, INSERTED.created_at
-        VALUES (@subjectId, @title, @examDate, 'future', @bonusPoints, @createdBy)
-      `);
+    const cleanGroups = [...new Set((Array.isArray(groups) ? groups : [])
+      .map((group) => String(group || "").trim())
+      .filter(Boolean))];
+    const cleanOwnerIds = [...new Set((Array.isArray(ownerIds) ? ownerIds : [])
+      .map(Number)
+      .filter(Number.isInteger))];
+
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    let exam;
+
+    try {
+      const result = await new sql.Request(transaction)
+        .input("subjectId", sql.Int, Number(subjectId))
+        .input("title", sql.NVarChar(150), title.trim())
+        .input("examDate", sql.DateTime, new Date(examDate))
+        .input("bonusPoints", sql.Decimal(5, 2), Number(bonusPoints) || 0)
+        .input("createdBy", sql.Int, req.user.id)
+        .query(`
+          INSERT INTO exams (subject_id, title, exam_date, status, bonus_points, created_by)
+          OUTPUT INSERTED.id, INSERTED.subject_id, INSERTED.title,
+                 INSERTED.exam_date, INSERTED.status, INSERTED.bonus_points,
+                 INSERTED.created_by, INSERTED.created_at
+          VALUES (@subjectId, @title, @examDate, 'future', @bonusPoints, @createdBy)
+        `);
+
+      exam = result.recordset[0];
+
+      for (const groupName of cleanGroups) {
+        await new sql.Request(transaction)
+          .input("examId", sql.Int, exam.id)
+          .input("groupName", sql.NVarChar(50), groupName)
+          .query(`
+            INSERT INTO exam_groups (exam_id, group_name)
+            VALUES (@examId, @groupName)
+          `);
+      }
+
+      for (const ownerId of cleanOwnerIds) {
+        await new sql.Request(transaction)
+          .input("examId", sql.Int, exam.id)
+          .input("professorId", sql.Int, ownerId)
+          .query(`
+            IF EXISTS (SELECT 1 FROM users WHERE id = @professorId AND role = 'professor')
+            BEGIN
+              INSERT INTO exam_owners (exam_id, professor_id)
+              VALUES (@examId, @professorId)
+            END
+          `);
+      }
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
 
     res.status(201).json({
       message: "Examen creat.",
-      exam: result.recordset[0],
+      exam,
     });
   } catch (error) {
     res.status(500).json({
@@ -1380,7 +1501,16 @@ async function updateExamStatus(req, res) {
                INSERTED.exam_date, INSERTED.status, INSERTED.created_by, INSERTED.created_at
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
-        WHERE e.id = @id AND (@isAdmin = 1 OR s.professor_id = @professorId)
+        WHERE e.id = @id
+          AND (
+            @isAdmin = 1
+            OR s.professor_id = @professorId
+            OR EXISTS (
+              SELECT 1
+              FROM exam_owners eo
+              WHERE eo.exam_id = e.id AND eo.professor_id = @professorId
+            )
+          )
       `);
 
     if (result.recordset.length === 0) {
@@ -1396,6 +1526,75 @@ async function updateExamStatus(req, res) {
   } catch (error) {
     res.status(500).json({
       message: "Eroare la actualizarea examenului.",
+      error: error.message,
+    });
+  }
+}
+
+/*
+----------------------------
+       Modificare data
+----------------------------
+*/
+// Permite reprogramarea unui examen scos din arhiva, pastrand variantele si configurarea lui.
+async function updateExamDate(req, res) {
+  try {
+    const examId = Number(req.params.id);
+    const examDate = new Date(req.body.examDate);
+
+    if (!Number.isInteger(examId)) {
+      return res.status(400).json({
+        message: "ID examen invalid.",
+      });
+    }
+
+    if (Number.isNaN(examDate.getTime())) {
+      return res.status(400).json({
+        message: "Data examenului este invalida.",
+      });
+    }
+
+    const pool = await getPool();
+    const admin = isAdminUser(req.user);
+    const result = await pool
+      .request()
+      .input("id", sql.Int, examId)
+      .input("examDate", sql.DateTime2, examDate)
+      .input("professorId", sql.Int, req.user.id)
+      .input("isAdmin", sql.Bit, admin ? 1 : 0)
+      .query(`
+        UPDATE e
+        SET exam_date = @examDate
+        OUTPUT INSERTED.id, INSERTED.subject_id, INSERTED.title,
+               INSERTED.exam_date, INSERTED.status, INSERTED.created_by, INSERTED.created_at
+        FROM exams e
+        INNER JOIN subjects s ON s.id = e.subject_id
+        WHERE e.id = @id
+          AND e.status <> 'archived'
+          AND (
+            @isAdmin = 1
+            OR s.professor_id = @professorId
+            OR EXISTS (
+              SELECT 1
+              FROM exam_owners eo
+              WHERE eo.exam_id = e.id AND eo.professor_id = @professorId
+            )
+          )
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({
+        message: "Examenul nu a fost gasit, este inca arhivat sau nu ai dreptul sa il modifici.",
+      });
+    }
+
+    res.json({
+      message: "Data examenului a fost actualizata.",
+      exam: result.recordset[0],
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la actualizarea datei examenului.",
       error: error.message,
     });
   }
@@ -1482,7 +1681,14 @@ async function canManageExam(pool, req, examId) {
       FROM exams e
       INNER JOIN subjects s ON s.id = e.subject_id
       WHERE e.id = @examId
-        AND s.professor_id = @professorId
+        AND (
+          s.professor_id = @professorId
+          OR EXISTS (
+            SELECT 1
+            FROM exam_owners eo
+            WHERE eo.exam_id = e.id AND eo.professor_id = @professorId
+          )
+        )
     `);
 
   return result.recordset.length > 0;
@@ -2324,6 +2530,382 @@ async function markTestLockPlagiarism(req, res) {
 
 /*
 ----------------------------
+          Prezenta
+----------------------------
+*/
+// Profesorul marcheaza prezenta studentilor pe examen, grupat pe grupe.
+async function listExamAttendance(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(examId)) {
+      return res.status(400).json({
+        message: "ID examen invalid.",
+      });
+    }
+
+    const pool = await getPool();
+
+    if (!(await canManageExam(pool, req, examId))) {
+      return res.status(403).json({
+        message: "Nu ai dreptul sa gestionezi prezenta pentru acest examen.",
+      });
+    }
+
+    const examResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 e.id, e.title, e.exam_date, e.status, s.name AS subject_name
+        FROM exams e
+        INNER JOIN subjects s ON s.id = e.subject_id
+        WHERE e.id = @examId
+      `);
+
+    if (examResult.recordset.length === 0) {
+      return res.status(404).json({
+        message: "Examenul nu a fost gasit.",
+      });
+    }
+
+    const studentsResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT u.id, u.full_name, u.email, u.matriculation_number,
+               ISNULL(a.is_present, 0) AS is_present,
+               a.marked_at,
+               r.score, r.max_score, r.grade, r.submitted_at
+        FROM users u
+        LEFT JOIN exam_attendance a
+          ON a.student_id = u.id
+         AND a.exam_id = @examId
+        LEFT JOIN results r
+          ON r.student_id = u.id
+         AND r.exam_id = @examId
+        WHERE u.role = 'student'
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM exam_groups eg WHERE eg.exam_id = @examId
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM exam_groups eg
+              WHERE eg.exam_id = @examId
+                AND LTRIM(RTRIM(eg.group_name)) = LTRIM(RTRIM(ISNULL(u.matriculation_number, '')))
+            )
+          )
+        ORDER BY
+          CASE WHEN u.matriculation_number IS NULL OR LTRIM(RTRIM(u.matriculation_number)) = '' THEN 1 ELSE 0 END,
+          u.matriculation_number,
+          u.full_name
+      `);
+
+    const presentCount = studentsResult.recordset
+      .filter((student) => Boolean(student.is_present))
+      .length;
+
+    res.json({
+      exam: examResult.recordset[0],
+      presentCount,
+      totalStudents: studentsResult.recordset.length,
+      students: studentsResult.recordset,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la citirea prezentei.",
+      error: error.message,
+    });
+  }
+}
+
+async function saveExamAttendance(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+    const studentId = Number(req.params.studentId);
+    const isPresent = Boolean(req.body.isPresent);
+
+    if (!Number.isInteger(examId) || !Number.isInteger(studentId)) {
+      return res.status(400).json({
+        message: "Date prezenta invalide.",
+      });
+    }
+
+    const pool = await getPool();
+
+    if (!(await canManageExam(pool, req, examId))) {
+      return res.status(403).json({
+        message: "Nu ai dreptul sa gestionezi prezenta pentru acest examen.",
+      });
+    }
+
+    await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .input("studentId", sql.Int, studentId)
+      .input("professorId", sql.Int, req.user.id)
+      .input("isPresent", sql.Bit, isPresent ? 1 : 0)
+      .query(`
+        MERGE exam_attendance AS target
+        USING (
+          SELECT @examId AS exam_id, @studentId AS student_id, @professorId AS professor_id
+        ) AS source
+        ON target.exam_id = source.exam_id
+           AND target.student_id = source.student_id
+        WHEN MATCHED THEN
+          UPDATE SET is_present = @isPresent, professor_id = @professorId, marked_at = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN
+          INSERT (exam_id, student_id, professor_id, is_present)
+          VALUES (@examId, @studentId, @professorId, @isPresent);
+      `);
+
+    res.json({
+      message: isPresent ? "Student marcat prezent." : "Student marcat absent.",
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la salvarea prezentei.",
+      error: error.message,
+    });
+  }
+}
+
+async function getExamLiveRoom(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(examId)) {
+      return res.status(400).json({ message: "ID examen invalid." });
+    }
+
+    const pool = await getPool();
+
+    if (!(await canManageExam(pool, req, examId))) {
+      return res.status(403).json({ message: "Nu ai dreptul sa gestionezi acest examen." });
+    }
+
+    const examResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT TOP 1 e.id, e.title, e.exam_date, e.status, s.name AS subject_name
+        FROM exams e
+        INNER JOIN subjects s ON s.id = e.subject_id
+        WHERE e.id = @examId
+      `);
+
+    if (!examResult.recordset.length) {
+      return res.status(404).json({ message: "Examenul nu a fost gasit." });
+    }
+
+    const studentsResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .query(`
+        SELECT u.id, u.full_name, u.email, u.matriculation_number,
+               ISNULL(att.is_present, 0) AS is_present,
+               att.marked_at,
+               sea.row_number, sea.assigned_at AS started_at,
+               v.variant_name,
+               r.submitted_at, r.score, r.max_score, r.grade,
+               lock_data.lock_id, lock_data.event_type, lock_data.lock_created_at,
+               restart_data.restart_request_id, restart_data.restart_requested_at,
+               restart_data.restart_request_type,
+               restart_data.current_row_number AS requested_from_row_number,
+               restart_data.requested_row_number AS requested_to_row_number
+        FROM users u
+        LEFT JOIN exam_attendance att
+          ON att.exam_id = @examId
+         AND att.student_id = u.id
+        LEFT JOIN student_exam_assignments sea
+          ON sea.exam_id = @examId AND sea.student_id = u.id
+        LEFT JOIN exam_variants v
+          ON v.id = sea.variant_id
+        LEFT JOIN results r
+          ON r.exam_id = @examId AND r.student_id = u.id
+        OUTER APPLY (
+          SELECT TOP 1 l.id AS lock_id, l.event_type, l.created_at AS lock_created_at
+          FROM student_test_locks l
+          WHERE l.exam_id = @examId AND l.student_id = u.id AND l.is_active = 1
+          ORDER BY l.created_at DESC
+        ) lock_data
+        OUTER APPLY (
+          SELECT TOP 1 rr.id AS restart_request_id,
+                       rr.requested_at AS restart_requested_at,
+                       rr.request_type AS restart_request_type,
+                       rr.current_row_number,
+                       rr.requested_row_number
+          FROM exam_restart_requests rr
+          WHERE rr.exam_id = @examId AND rr.student_id = u.id AND rr.status = 'pending'
+          ORDER BY rr.requested_at DESC
+        ) restart_data
+        WHERE u.role = 'student'
+          AND (
+            NOT EXISTS (SELECT 1 FROM exam_groups eg WHERE eg.exam_id = @examId)
+            OR EXISTS (
+              SELECT 1 FROM exam_groups eg
+              WHERE eg.exam_id = @examId
+                AND LTRIM(RTRIM(eg.group_name)) = LTRIM(RTRIM(ISNULL(u.matriculation_number, '')))
+            )
+          )
+        ORDER BY u.matriculation_number, u.full_name
+      `);
+
+    const students = studentsResult.recordset;
+    res.json({
+      exam: examResult.recordset[0],
+      presentCount: students.filter((student) => Boolean(student.is_present)).length,
+      startedCount: students.filter((student) => student.started_at).length,
+      finishedCount: students.filter((student) => student.submitted_at).length,
+      students,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la citirea situatiei live a examenului.",
+      error: error.message,
+    });
+  }
+}
+
+async function approveExamRestart(req, res) {
+  try {
+    const requestId = Number(req.params.requestId);
+
+    if (!Number.isInteger(requestId)) {
+      return res.status(400).json({ message: "Cerere invalida." });
+    }
+
+    const pool = await getPool();
+    const requestResult = await pool
+      .request()
+      .input("requestId", sql.Int, requestId)
+      .query(`
+        SELECT TOP 1 id, exam_id, student_id, request_type, requested_row_number
+        FROM exam_restart_requests
+        WHERE id = @requestId AND status = 'pending'
+      `);
+
+    if (!requestResult.recordset.length) {
+      return res.status(404).json({ message: "Cererea nu mai este activa." });
+    }
+
+    const request = requestResult.recordset[0];
+
+    if (!(await canManageExam(pool, req, Number(request.exam_id)))) {
+      return res.status(403).json({ message: "Nu ai dreptul sa aprobi aceasta reluare." });
+    }
+
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      if (request.request_type === "row_change") {
+        const requestedRowNumber = Number(request.requested_row_number);
+
+        if (!Number.isInteger(requestedRowNumber)) {
+          await transaction.rollback();
+          return res.status(400).json({ message: "Cererea nu are rand nou valid." });
+        }
+
+        const variantResult = await new sql.Request(transaction)
+          .input("examId", sql.Int, Number(request.exam_id))
+          .input("rowNumber", sql.Int, requestedRowNumber)
+          .query(`
+            SELECT TOP 1 id, row_number
+            FROM exam_variants
+            WHERE exam_id = @examId AND row_number = @rowNumber
+            ORDER BY id
+          `);
+
+        if (!variantResult.recordset.length) {
+          await transaction.rollback();
+          return res.status(404).json({ message: "Varianta pentru randul cerut nu mai exista." });
+        }
+
+        await new sql.Request(transaction)
+          .input("examId", sql.Int, Number(request.exam_id))
+          .input("studentId", sql.Int, Number(request.student_id))
+          .input("variantId", sql.Int, Number(variantResult.recordset[0].id))
+          .input("rowNumber", sql.Int, Number(variantResult.recordset[0].row_number))
+          .query(`
+            MERGE student_exam_assignments AS target
+            USING (
+              SELECT @studentId AS student_id, @examId AS exam_id
+            ) AS source
+            ON target.student_id = source.student_id AND target.exam_id = source.exam_id
+            WHEN MATCHED THEN
+              UPDATE SET variant_id = @variantId, row_number = @rowNumber
+            WHEN NOT MATCHED THEN
+              INSERT (student_id, exam_id, variant_id, row_number)
+              VALUES (@studentId, @examId, @variantId, @rowNumber);
+
+            DELETE FROM student_answer_drafts
+            WHERE exam_id = @examId AND student_id = @studentId;
+
+            DELETE FROM student_answers
+            WHERE exam_id = @examId AND student_id = @studentId;
+
+            DELETE FROM results
+            WHERE exam_id = @examId AND student_id = @studentId;
+          `);
+      } else {
+        await new sql.Request(transaction)
+          .input("examId", sql.Int, Number(request.exam_id))
+          .input("studentId", sql.Int, Number(request.student_id))
+          .query(`
+            DELETE FROM student_answer_drafts
+            WHERE exam_id = @examId AND student_id = @studentId;
+
+            INSERT INTO student_answer_drafts (student_id, exam_id, question_id, answer_id)
+            SELECT DISTINCT student_id, exam_id, question_id, answer_id
+            FROM student_answers
+            WHERE exam_id = @examId
+              AND student_id = @studentId
+              AND answer_id IS NOT NULL;
+
+            DELETE FROM student_answers
+            WHERE exam_id = @examId AND student_id = @studentId;
+
+            DELETE FROM results
+            WHERE exam_id = @examId AND student_id = @studentId;
+          `);
+      }
+
+      await new sql.Request(transaction)
+        .input("examId", sql.Int, Number(request.exam_id))
+        .input("studentId", sql.Int, Number(request.student_id))
+        .query(`
+          UPDATE student_test_locks
+          SET is_active = 0, released_at = SYSUTCDATETIME()
+          WHERE exam_id = @examId AND student_id = @studentId AND is_active = 1
+        `);
+
+      await new sql.Request(transaction)
+        .input("requestId", sql.Int, requestId)
+        .input("resolvedBy", sql.Int, req.user.id)
+        .query(`
+          UPDATE exam_restart_requests
+          SET status = 'approved', resolved_at = SYSUTCDATETIME(), resolved_by = @resolvedBy
+          WHERE id = @requestId
+        `);
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+
+    res.json({ message: "Reluarea testului a fost aprobata. Randul si raspunsurile anterioare au fost pastrate." });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la aprobarea reluarii testului.",
+      error: error.message,
+    });
+  }
+}
+
+/*
+----------------------------
        Asignare variante
 ----------------------------
 */
@@ -2371,6 +2953,17 @@ async function listExamAssignments(req, res) {
         LEFT JOIN student_exam_assignments a
           ON a.student_id = u.id AND a.exam_id = @examId
         WHERE u.role = 'student'
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM exam_groups eg WHERE eg.exam_id = @examId
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM exam_groups eg
+              WHERE eg.exam_id = @examId
+                AND LTRIM(RTRIM(eg.group_name)) = LTRIM(RTRIM(ISNULL(u.matriculation_number, '')))
+            )
+          )
         ORDER BY u.full_name
       `);
 
@@ -2676,6 +3269,8 @@ async function importRtf(req, res) {
       });
     }
 
+    const warnings = getRtfImportWarnings(parsedVariants);
+
     extractedImages.forEach((image) => {
       parsedVariants.forEach((variant) => {
         const question = variant.questions[image.questionNumber - 1];
@@ -2751,6 +3346,7 @@ async function importRtf(req, res) {
         message: "RTF importat.",
         importedVariants,
         importedQuestions,
+        warnings,
       });
     } catch (error) {
       await transaction.rollback();
@@ -2769,12 +3365,15 @@ module.exports = {
   createQuestion,
   createSubject,
   createVariant,
+  approveExamRestart,
   deleteVariant,
   deleteSubject,
   deleteExam,
   importRtf,
   getResultDetails,
+  getExamLiveRoom,
   listExamAssignments,
+  listExamAttendance,
   listActiveTestLocks,
   listExams,
   listResults,
@@ -2783,8 +3382,10 @@ module.exports = {
   markTestLockPlagiarism,
   randomizeExamAssignments,
   releaseTestLock,
+  saveExamAttendance,
   saveExamAssignment,
   updateSubjectAssignment,
   updateSubjectInfo,
+  updateExamDate,
   updateExamStatus,
 };

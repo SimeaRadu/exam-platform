@@ -383,6 +383,10 @@ async function deleteExamTree(transaction, examId) {
 
   await new sql.Request(transaction)
     .input("examId", sql.Int, examId)
+    .query("DELETE FROM exam_restart_requests WHERE exam_id = @examId");
+
+  await new sql.Request(transaction)
+    .input("examId", sql.Int, examId)
     .query("DELETE FROM student_test_events WHERE exam_id = @examId");
 
   await new sql.Request(transaction)
@@ -439,6 +443,10 @@ async function deleteStudentData(transaction, userId) {
   await new sql.Request(transaction)
     .input("userId", sql.Int, userId)
     .query("DELETE FROM student_test_locks WHERE student_id = @userId");
+
+  await new sql.Request(transaction)
+    .input("userId", sql.Int, userId)
+    .query("DELETE FROM exam_restart_requests WHERE student_id = @userId OR resolved_by = @userId");
 
   await new sql.Request(transaction)
     .input("userId", sql.Int, userId)

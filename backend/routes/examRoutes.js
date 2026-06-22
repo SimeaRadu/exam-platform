@@ -7,6 +7,7 @@
 const express = require("express");
 const multer = require("multer");
 const {
+  approveExamRestart,
   createExam,
   createQuestion,
   createSubject,
@@ -15,8 +16,10 @@ const {
   deleteSubject,
   deleteExam,
   getResultDetails,
+  getExamLiveRoom,
   importRtf,
   listActiveTestLocks,
+  listExamAttendance,
   listExamAssignments,
   listExams,
   listResults,
@@ -25,9 +28,11 @@ const {
   markTestLockPlagiarism,
   randomizeExamAssignments,
   releaseTestLock,
+  saveExamAttendance,
   saveExamAssignment,
   updateSubjectAssignment,
   updateSubjectInfo,
+  updateExamDate,
   updateExamStatus,
 } = require("../controllers/examController");
 const {
@@ -85,10 +90,10 @@ router.use(requireRole("professor"));
 */
 // Materiile sunt administrate de admin, iar informatiile pot fi editate si de profesorul asignat.
 router.get("/subjects", listSubjects);
-router.post("/subjects", requireAdmin, createSubject);
-router.patch("/subjects/:id/assignment", requireAdmin, updateSubjectAssignment);
+router.post("/subjects", createSubject);
+router.patch("/subjects/:id/assignment", updateSubjectAssignment);
 router.patch("/subjects/:id/info", updateSubjectInfo);
-router.delete("/subjects/:id", requireAdmin, deleteSubject);
+router.delete("/subjects/:id", deleteSubject);
 
 /*
 ----------------------------
@@ -98,6 +103,7 @@ router.delete("/subjects/:id", requireAdmin, deleteSubject);
 // Examenele se creeaza, se listeaza, se sterg si isi schimba statusul prin aceste rute.
 router.get("/exams", listExams);
 router.post("/exams", createExam);
+router.patch("/exams/:id/date", updateExamDate);
 router.patch("/exams/:id/status", updateExamStatus);
 router.delete("/exams/:id", deleteExam);
 
@@ -112,6 +118,10 @@ router.get("/results/:id", getResultDetails);
 router.get("/test-locks", listActiveTestLocks);
 router.post("/test-locks/:lockId/release", releaseTestLock);
 router.post("/test-locks/:lockId/plagiarism", markTestLockPlagiarism);
+router.get("/exams/:examId/attendance", listExamAttendance);
+router.patch("/exams/:examId/attendance/:studentId", saveExamAttendance);
+router.get("/exams/:examId/live", getExamLiveRoom);
+router.post("/restart-requests/:requestId/approve", approveExamRestart);
 
 /*
 ----------------------------
@@ -124,7 +134,9 @@ router.post("/exams/:examId/variants", createVariant);
 router.delete("/variants/:variantId", deleteVariant);
 router.get("/exams/:examId/assignments", listExamAssignments);
 router.post("/exams/:examId/assignments", saveExamAssignment);
-router.post("/exams/:examId/assignments/random", randomizeExamAssignments);
+router.post("/exams/:examId/assignments/random", (req, res) => res.status(410).json({
+  message: "Asignarea aleatoare a fost scoasa din flux.",
+}));
 router.post("/exams/:examId/import-rtf", uploadRtf.single("rtfFile"), importRtf);
 router.post("/variants/:variantId/questions", uploadQuestionImage.single("questionImage"), createQuestion);
 

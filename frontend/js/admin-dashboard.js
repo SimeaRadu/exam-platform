@@ -5,8 +5,10 @@
 Se verifica sesiunea profesorului/adminului si se leaga elementele HTML folosite in pagina.
 */
 const user = requireAuth("professor");
+const dashboardTitle = document.getElementById("dashboardTitle");
 const professorName = document.getElementById("professorName");
 const logoutButton = document.getElementById("logoutButton");
+const dashboardThemeSelect = document.getElementById("dashboardThemeSelect");
 const createUserForm = document.getElementById("createUserForm");
 const createUserMessage = document.getElementById("createUserMessage");
 const usersTableBody = document.getElementById("usersTableBody");
@@ -41,6 +43,12 @@ const subjectsList = document.getElementById("subjectsList");
 const createExamForm = document.getElementById("createExamForm");
 const createExamMessage = document.getElementById("createExamMessage");
 const examSubject = document.getElementById("examSubject");
+const examGroupsList = document.getElementById("examGroupsList");
+const selectedExamGroupsPanel = document.getElementById("selectedExamGroupsPanel");
+const selectedExamGroupsCount = document.getElementById("selectedExamGroupsCount");
+const examOwnersList = document.getElementById("examOwnersList");
+const selectedExamOwnersPanel = document.getElementById("selectedExamOwnersPanel");
+const selectedExamOwnersCount = document.getElementById("selectedExamOwnersCount");
 const examsTableBody = document.getElementById("examsTableBody");
 const refreshExamsButton = document.getElementById("refreshExamsButton");
 const variantExamsTableBody = document.getElementById("variantExamsTableBody");
@@ -83,6 +91,28 @@ const resultDetailsMeta = document.getElementById("resultDetailsMeta");
 const resultDetailsContent = document.getElementById("resultDetailsContent");
 const closeResultDetailsButton = document.getElementById("closeResultDetailsButton");
 const testLockNotifications = document.getElementById("testLockNotifications");
+const attendanceExam = document.getElementById("attendanceExam");
+const refreshAttendanceButton = document.getElementById("refreshAttendanceButton");
+const downloadAttendanceButton = document.getElementById("downloadAttendanceButton");
+const attendanceMessage = document.getElementById("attendanceMessage");
+const attendancePanel = document.getElementById("attendancePanel");
+const attendanceTitle = document.getElementById("attendanceTitle");
+const attendanceMeta = document.getElementById("attendanceMeta");
+const attendanceCounter = document.getElementById("attendanceCounter");
+const attendanceGroups = document.getElementById("attendanceGroups");
+const examRoomSection = document.getElementById("examRoomSection");
+const examRoomTitle = document.getElementById("examRoomTitle");
+const examRoomMeta = document.getElementById("examRoomMeta");
+const examRoomPresentCount = document.getElementById("examRoomPresentCount");
+const examRoomStartButton = document.getElementById("examRoomStartButton");
+const examRoomStopButton = document.getElementById("examRoomStopButton");
+const examRoomDownloadButton = document.getElementById("examRoomDownloadButton");
+const closeExamRoomButton = document.getElementById("closeExamRoomButton");
+const examRoomGroups = document.getElementById("examRoomGroups");
+const examRoomGroupTitle = document.getElementById("examRoomGroupTitle");
+const examRoomStats = document.getElementById("examRoomStats");
+const examRoomStudents = document.getElementById("examRoomStudents");
+const examRoomMessage = document.getElementById("examRoomMessage");
 let canManageUsers = user && user.unique_code === "PROF-ADMIN";
 let allExams = [];
 let examFilter = "all";
@@ -95,15 +125,213 @@ let assignmentVariants = [];
 let assignmentsReadOnly = false;
 let allSubjects = [];
 let allProfessors = [];
+let allStudentGroups = [];
 let allResults = [];
 let selectedResultsExamId = null;
 let selectedResultDetailsId = null;
 let canManageAccounts = true;
 let activeTestLocks = [];
+let currentAttendance = null;
+const examDateDrafts = new Map();
+let currentExamRoom = null;
+let selectedExamRoomGroup = null;
 
-if (user) {
-  professorName.textContent = user.full_name || "Profesor";
+function isAdminAccount() {
+  return user?.unique_code === "PROF-ADMIN" || user?.uniqueCode === "PROF-ADMIN";
 }
+
+function setDashboardIdentity(sectionLabel = null) {
+  if (dashboardTitle) {
+    dashboardTitle.textContent = isAdminAccount() ? "Dashboard admin" : "Dashboard profesor";
+  }
+
+  if (sectionLabel) {
+    professorName.textContent = sectionLabel;
+    return;
+  }
+
+  professorName.textContent = isAdminAccount() ? "Admin" : (user?.full_name || "Profesor");
+}
+
+setDashboardIdentity();
+
+const collapseStorageKey = `exam-platform-collapses-${user?.id || "dashboard"}`;
+
+function getSavedCollapseStates() {
+  try {
+    return JSON.parse(localStorage.getItem(collapseStorageKey) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function initializePersistentCollapses(root = document) {
+  const savedStates = getSavedCollapseStates();
+
+  root.querySelectorAll("details[data-collapse-key]").forEach((details) => {
+    if (details.dataset.collapseInitialized === "true") {
+      return;
+    }
+
+    const key = details.dataset.collapseKey;
+
+    if (Object.prototype.hasOwnProperty.call(savedStates, key)) {
+      details.open = Boolean(savedStates[key]);
+    }
+
+    details.dataset.collapseInitialized = "true";
+    details.addEventListener("toggle", () => {
+      const currentStates = getSavedCollapseStates();
+      currentStates[key] = details.open;
+      localStorage.setItem(collapseStorageKey, JSON.stringify(currentStates));
+    });
+  });
+}
+
+function saveCollapseState(key, isOpen) {
+  const currentStates = getSavedCollapseStates();
+  currentStates[key] = isOpen;
+  localStorage.setItem(collapseStorageKey, JSON.stringify(currentStates));
+}
+
+function initializeCollapsiblePanels() {
+  const savedStates = getSavedCollapseStates();
+
+  document.querySelectorAll("[data-collapsible-panel]").forEach((panel, panelIndex) => {
+    if (panel.dataset.panelCollapseInitialized === "true") {
+      return;
+    }
+
+    const heading = [...panel.children].find((item) => item.classList?.contains("section-heading"));
+
+    if (!heading) {
+      return;
+    }
+
+    const section = panel.closest(".dashboard-section");
+    const title = heading.querySelector("h2")?.textContent.trim() || `panou-${panelIndex + 1}`;
+      const normalizedTitle = title.toLocaleLowerCase("ro")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      const key = `panel-${section?.id || "dashboard"}-${normalizedTitle || panelIndex + 1}`;
+      const toggle = document.createElement("button");
+
+      panel.classList.add("collapsible-panel");
+      panel.dataset.panelCollapseInitialized = "true";
+      panel.dataset.collapseKey = key;
+      heading.classList.add("collapsible-panel-heading");
+      toggle.className = "panel-collapse-toggle";
+      toggle.type = "button";
+      toggle.setAttribute("aria-label", `Extinde sau restrange ${title}`);
+      toggle.innerHTML = '<span aria-hidden="true">−</span>';
+      heading.appendChild(toggle);
+
+      const setPanelOpen = (isOpen, persist = true) => {
+        panel.classList.toggle("is-collapsed", !isOpen);
+        toggle.setAttribute("aria-expanded", String(isOpen));
+        toggle.querySelector("span").textContent = isOpen ? "−" : "+";
+
+        if (persist) {
+          saveCollapseState(key, isOpen);
+        }
+      };
+
+      const initialOpen = Object.prototype.hasOwnProperty.call(savedStates, key)
+        ? Boolean(savedStates[key])
+        : false;
+      setPanelOpen(initialOpen, false);
+
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setPanelOpen(panel.classList.contains("is-collapsed"));
+      });
+
+      heading.addEventListener("click", (event) => {
+        if (event.target.closest("button, a, input, select, textarea, label")) {
+          return;
+        }
+
+        setPanelOpen(panel.classList.contains("is-collapsed"));
+      });
+  });
+}
+
+const collapseObserver = new MutationObserver((mutations) => {
+  mutations.forEach((mutation) => {
+    mutation.addedNodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      if (node.matches?.("details[data-collapse-key]")) {
+        initializePersistentCollapses(node.parentElement || document);
+        return;
+      }
+
+      initializePersistentCollapses(node);
+    });
+  });
+});
+
+collapseObserver.observe(document.body, { childList: true, subtree: true });
+initializePersistentCollapses();
+initializeCollapsiblePanels();
+
+function resetSectionCollapses(sectionId) {
+  const prefixesBySection = {
+    usersSection: ["panel-usersSection-", "users-group-", "users-staff"],
+    subjectsSection: ["panel-subjectsSection-", "subject-"],
+    examsSection: ["panel-examsSection-"],
+    variantsSection: ["variants-"],
+    archiveSection: ["archive-subject-"],
+    resultsSection: ["result-exam-", "results-"],
+  };
+  const prefixes = prefixesBySection[sectionId] || [`panel-${sectionId}-`];
+  const savedStates = getSavedCollapseStates();
+
+  Object.keys(savedStates).forEach((key) => {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
+      delete savedStates[key];
+    }
+  });
+  localStorage.setItem(collapseStorageKey, JSON.stringify(savedStates));
+
+  const section = document.getElementById(sectionId);
+
+  if (!section) {
+    return;
+  }
+
+  section.querySelectorAll("[data-collapsible-panel]").forEach((panel) => {
+    panel.classList.add("is-collapsed");
+    const toggle = panel.querySelector(":scope > .section-heading .panel-collapse-toggle");
+
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.querySelector("span").textContent = "+";
+    }
+  });
+
+  section.querySelectorAll("details[data-collapse-key]").forEach((details) => {
+    details.open = false;
+  });
+}
+
+function applyDashboardTheme(theme) {
+  const allowedThemes = ["blue", "beige", "dark-yellow"];
+  const nextTheme = allowedThemes.includes(theme) ? theme : "blue";
+
+  document.body.classList.remove("theme-blue", "theme-beige", "theme-dark-yellow");
+  document.body.classList.add(`theme-${nextTheme}`);
+
+  if (dashboardThemeSelect) {
+    dashboardThemeSelect.value = nextTheme;
+  }
+}
+
+applyDashboardTheme(localStorage.getItem("dashboardTheme") || "blue");
 
 /*
 ----------------------------
@@ -115,7 +343,7 @@ function showAdminMenu() {
   activeSectionId = "menu";
   adminMenuSection.classList.remove("hidden");
   dashboardSections.forEach((section) => section.classList.add("hidden"));
-  professorName.textContent = "Meniu principal";
+  setDashboardIdentity();
 }
 
 function showDashboardSection(sectionId) {
@@ -124,6 +352,7 @@ function showDashboardSection(sectionId) {
   dashboardSections.forEach((section) => {
     section.classList.toggle("hidden", section.id !== sectionId);
   });
+  resetSectionCollapses(sectionId);
 
   if (sectionId === "usersSection") {
     professorName.textContent = "Administrare utilizatori";
@@ -146,6 +375,12 @@ function showDashboardSection(sectionId) {
   if (sectionId === "examsSection") {
     professorName.textContent = "Examene";
     loadExamData();
+    return;
+  }
+
+  if (sectionId === "attendanceSection") {
+    professorName.textContent = "Prezenta";
+    loadAttendanceExamOptions();
     return;
   }
 
@@ -240,7 +475,7 @@ function updateRoleFields() {
 ----------------------------
 Afiseaza utilizatorii grupati pe grupe, permite import Excel si stergere doar pentru admin.
 */
-function renderUsers(users) {
+function renderUsersLegacy(users) {
   if (!users.length) {
     usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">Nu exista utilizatori.</td></tr>`;
     return;
@@ -326,11 +561,122 @@ function renderUsers(users) {
   usersTableBody.innerHTML = rows.join("");
 }
 
+function renderUsers(users) {
+  if (!users.length) {
+    usersTableBody.innerHTML = '<p class="muted-note">Nu exista utilizatori.</p>';
+    return;
+  }
+
+  const students = users
+    .filter((item) => item.role === "student")
+    .sort((first, second) => {
+      const firstGroup = first.matriculation_number || "Fara grupa";
+      const secondGroup = second.matriculation_number || "Fara grupa";
+
+      return firstGroup.localeCompare(secondGroup, "ro")
+        || String(first.full_name || "").localeCompare(String(second.full_name || ""), "ro");
+    });
+  const staff = users
+    .filter((item) => item.role !== "student")
+    .sort((first, second) => String(first.full_name || "").localeCompare(String(second.full_name || ""), "ro"));
+  const studentGroups = new Map();
+
+  students.forEach((student) => {
+    const groupName = student.matriculation_number || "Fara grupa";
+
+    if (!studentGroups.has(groupName)) {
+      studentGroups.set(groupName, []);
+    }
+
+    studentGroups.get(groupName).push(student);
+  });
+
+  function renderUserRow(item, showRole = false) {
+    return `
+      <tr>
+        <td><strong>${escapeHtml(item.full_name) || "-"}</strong></td>
+        <td>${escapeHtml(item.email) || "-"}</td>
+        ${showRole ? `<td>${escapeHtml(item.role) || "-"}</td>` : ""}
+        ${canManageAccounts ? `
+          <td>
+            <div class="secret-cell">
+              <span data-secret-value="${escapeHtml(item.unique_code)}">&bull;&bull;&bull;&bull;&bull;&bull;</span>
+              <button class="icon-button table-eye-button" type="button" data-toggle-secret aria-label="Arata codul unic">
+                <span class="eye-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+          </td>
+          <td>
+            <button class="danger-button" type="button" data-delete-user="${item.id}">Sterge</button>
+          </td>
+        ` : ""}
+      </tr>
+    `;
+  }
+
+  function renderUsersTable(items, showRole = false) {
+    return `
+      <div class="table-wrap user-group-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Nume</th>
+              <th>Email</th>
+              ${showRole ? "<th>Rol</th>" : ""}
+              ${canManageAccounts ? "<th>Cod unic</th><th>Actiuni</th>" : ""}
+            </tr>
+          </thead>
+          <tbody>${items.map((item) => renderUserRow(item, showRole)).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  const sections = [...studentGroups.entries()].map(([groupName, groupStudents]) => `
+    <details class="collapse-group user-group" data-collapse-key="users-group-${escapeHtml(encodeURIComponent(groupName))}">
+      <summary class="collapse-summary user-group-summary">
+        <span class="user-group-title">
+          <strong>Grupa ${escapeHtml(groupName)}</strong>
+          <span class="selection-count">${groupStudents.length}</span>
+        </span>
+        <span class="user-group-summary-actions">
+          <span class="muted-note">${groupStudents.length === 1 ? "1 student" : `${groupStudents.length} studenti`}</span>
+          ${canManageAccounts ? `
+            <button class="danger-button group-delete-button" type="button" data-delete-group="${escapeHtml(groupName)}">
+              Sterge grupa
+            </button>
+          ` : ""}
+        </span>
+      </summary>
+      ${renderUsersTable(groupStudents)}
+    </details>
+  `);
+
+  if (staff.length) {
+    sections.push(`
+      <details class="collapse-group user-group staff-group" data-collapse-key="users-staff">
+        <summary class="collapse-summary user-group-summary">
+          <span class="user-group-title">
+            <strong>Profesori si administratori</strong>
+            <span class="selection-count">${staff.length}</span>
+          </span>
+          <span class="muted-note">${staff.length === 1 ? "1 cont" : `${staff.length} conturi`}</span>
+        </summary>
+        ${renderUsersTable(staff, true)}
+      </details>
+    `);
+  }
+
+  usersTableBody.innerHTML = sections.length
+    ? sections.join("")
+    : '<p class="muted-note">Nu exista utilizatori.</p>';
+}
+
 async function loadUsers(options = {}) {
   const silent = options.silent === true;
 
   if (!silent) {
-    usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">Se incarca...</td></tr>`;
+    usersTableBody.innerHTML = '<p class="muted-note">Se incarca...</p>';
   }
 
   try {
@@ -344,7 +690,7 @@ async function loadUsers(options = {}) {
       return;
     }
 
-    usersTableBody.innerHTML = `<tr><td colspan="${canManageAccounts ? 6 : 4}">${escapeHtml(error.message)}</td></tr>`;
+    usersTableBody.innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -364,9 +710,11 @@ function updateUserManagementVisibility() {
     updateRoleFields();
   }
 
-  subjectAdminPanel.classList.toggle("hidden", !canManageUsers);
-  subjectReadonlyNotice.classList.toggle("hidden", canManageUsers);
-  subjectAssignmentPanel.classList.toggle("hidden", !canManageUsers);
+  subjectAdminPanel.classList.remove("hidden");
+  subjectReadonlyNotice.classList.add("hidden");
+  subjectProfessor.closest("div").classList.remove("hidden");
+  subjectProfessor.required = false;
+  subjectAssignmentPanel.classList.remove("hidden");
   document.querySelectorAll("[data-admin-only-menu]").forEach((item) => {
     item.classList.toggle("hidden", !canManageUsers);
   });
@@ -395,6 +743,27 @@ function formatExamDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function formatPoints(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "0.00";
+}
+
+function formatGrade(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "0.00";
+}
+
+function formatDateTimeLocal(value) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
 }
 
 function getFileUrl(path) {
@@ -446,6 +815,10 @@ function statusButton(exam, status, label) {
 }
 
 function canManageExam(exam) {
+  if (exam.can_manage === true || exam.can_manage === 1) {
+    return true;
+  }
+
   return canManageUsers
     || String(exam.professor_id) === String(user.id);
 }
@@ -475,11 +848,9 @@ function renderSubjects(subjects) {
           <strong>${escapeHtml(subject.name)}</strong>
           <span class="muted-note">Profesor: ${escapeHtml(subject.professor_name || "neasignat")}</span>
         </span>
-        ${canManageUsers ? `
-          <button class="danger-button" type="button" data-delete-subject="${subject.id}">
-            Sterge
-          </button>
-        ` : ""}
+        <button class="danger-button" type="button" data-delete-subject="${subject.id}">
+          Sterge
+        </button>
       </article>
     `).join("")
     : "<p>Nu exista materii.</p>";
@@ -506,6 +877,15 @@ function renderProfessorOptions(professors) {
   allProfessors = professors;
   subjectProfessor.innerHTML = '<option value="">Fara profesor asignat</option>';
   assignProfessor.innerHTML = '<option value="">Alege profesorul</option>';
+  examOwnersList.innerHTML = professors.length
+    ? professors.map((professor) => `
+      <label class="checkbox-tile">
+        <input type="checkbox" name="examOwner" value="${professor.id}">
+        <span>${escapeHtml(professor.full_name)}</span>
+      </label>
+    `).join("")
+    : '<p class="muted-note">Nu exista profesori.</p>';
+  updateSelectedExamOwnersPanel();
 
   professors.forEach((professor) => {
     const label = `${professor.full_name}${professor.email ? ` (${professor.email})` : ""}`;
@@ -520,6 +900,40 @@ function renderProfessorOptions(professors) {
     assignOption.textContent = label;
     assignProfessor.appendChild(assignOption);
   });
+}
+
+function renderExamGroups(groups) {
+  allStudentGroups = groups;
+  examGroupsList.innerHTML = groups.length
+    ? groups.map((group) => `
+      <label class="checkbox-tile">
+        <input type="checkbox" name="examGroup" value="${escapeHtml(group)}">
+        <span>${escapeHtml(group)}</span>
+      </label>
+    `).join("")
+    : '<p class="muted-note">Nu exista grupe de studenti.</p>';
+  updateSelectedExamGroupsPanel();
+}
+
+function updateSelectedExamGroupsPanel() {
+  const selectedGroups = [...createExamForm.querySelectorAll('input[name="examGroup"]:checked')]
+    .map((input) => input.value);
+
+  selectedExamGroupsCount.textContent = selectedGroups.length;
+  selectedExamGroupsPanel.innerHTML = selectedGroups.length
+    ? selectedGroups.map((group) => `<span class="selected-chip">${escapeHtml(group)}</span>`).join("")
+    : '<span class="muted-note">Nicio grupa selectata.</span>';
+}
+
+function updateSelectedExamOwnersPanel() {
+  const selectedOwners = [...createExamForm.querySelectorAll('input[name="examOwner"]:checked')]
+    .map((input) => input.closest(".checkbox-tile")?.querySelector("span")?.textContent.trim())
+    .filter(Boolean);
+
+  selectedExamOwnersCount.textContent = selectedOwners.length;
+  selectedExamOwnersPanel.innerHTML = selectedOwners.length
+    ? selectedOwners.map((owner) => `<span class="selected-chip">${escapeHtml(owner)}</span>`).join("")
+    : '<span class="muted-note">Niciun profesor selectat.</span>';
 }
 
 function renderRtfExamOptions(exams) {
@@ -545,7 +959,11 @@ function renderExamRows(exams, options = {}) {
   return exams.map((exam) => `
     <tr>
       <td><span class="table-text">${escapeHtml(exam.subject_name)}</span></td>
-      <td><span class="table-text">${escapeHtml(exam.title)}</span></td>
+      <td>
+        <span class="table-text">${escapeHtml(exam.title)}</span>
+        ${exam.group_names ? `<span class="muted-note">Grupe: ${escapeHtml(exam.group_names)}</span>` : ""}
+        ${exam.owner_names ? `<span class="muted-note">Owneri: ${escapeHtml(exam.owner_names)}</span>` : ""}
+      </td>
       <td><span class="table-date">${formatExamDate(exam.exam_date)}</span></td>
       <td>
         <div class="status-stack">
@@ -558,15 +976,28 @@ function renderExamRows(exams, options = {}) {
           ${canManageExam(exam) ? `
             ${mode === "main" ? `
               ${statusButton(exam, "future", "Viitor")}
-              ${statusButton(exam, "active", "Start")}
+              <button class="primary-button" type="button" data-open-exam-room="${exam.id}">Intrare in examen</button>
               ${statusButton(exam, "finished", "Finalizeaza")}
+              ${exam.status === "finished" ? `
+                <span class="exam-date-picker">
+                  <button class="secondary-button" type="button" data-open-exam-date="${exam.id}">
+                    Seteaza data
+                  </button>
+                  <input
+                    class="exam-date-picker-input"
+                    type="datetime-local"
+                    value="${escapeHtml(examDateDrafts.get(String(exam.id)) || formatDateTimeLocal(exam.exam_date))}"
+                    data-exam-date-input="${exam.id}"
+                    aria-label="Data noua pentru ${escapeHtml(exam.title)}"
+                  >
+                </span>
+              ` : ""}
               ${statusButton(exam, "archived", "Arhiveaza")}
             ` : ""}
             ${mode === "archive" ? `
               <button class="secondary-button" type="button" data-exam-status="${exam.id}:finished">Scoate din arhiva</button>
               <button class="secondary-button" type="button" data-download-archive="${exam.id}">Descarca Excel</button>
             ` : ""}
-            ${mode === "main" ? `<button class="secondary-button" type="button" data-manage-assignments="${exam.id}">Asignari</button>` : ""}
             <button class="secondary-button" type="button" data-manage-variants="${exam.id}">Variante</button>
             ${mode !== "variant" ? `<button class="danger-button" type="button" data-delete-exam="${exam.id}">Sterge</button>` : ""}
           ` : '<span class="muted-note">Doar vizualizare</span>'}
@@ -609,9 +1040,14 @@ function renderArchive(exams) {
   }
 
   archiveList.innerHTML = groupExamsBySubject(archivedExams).map(([subjectName, subjectExams]) => `
-    <article class="variant-block">
-      <h3>${escapeHtml(subjectName)}</h3>
-      <div class="table-wrap">
+    <details class="variant-block archive-subject-collapse" data-collapse-key="archive-subject-${escapeHtml(encodeURIComponent(subjectName))}">
+      <summary class="variant-summary">
+        <span class="variant-summary-content">
+          <strong>${escapeHtml(subjectName)}</strong>
+          <span class="muted-note">${subjectExams.length === 1 ? "1 examen arhivat" : `${subjectExams.length} examene arhivate`}</span>
+        </span>
+      </summary>
+      <div class="table-wrap archive-subject-table">
         <table>
           <thead>
             <tr>
@@ -627,7 +1063,7 @@ function renderArchive(exams) {
           </tbody>
         </table>
       </div>
-    </article>
+    </details>
   `).join("");
 }
 
@@ -671,8 +1107,15 @@ async function loadSubjects() {
   return data.subjects;
 }
 
+async function loadStudentGroups() {
+  const data = await apiRequest("/auth/student-groups");
+  renderExamGroups(data.groups || []);
+  return data.groups || [];
+}
+
 async function loadExams(options = {}) {
   const silent = options.silent === true;
+  const isEditingExamDate = document.activeElement?.matches?.("[data-exam-date-input]");
 
   if (!silent) {
     examsTableBody.innerHTML = '<tr><td colspan="5">Se incarca...</td></tr>';
@@ -682,6 +1125,11 @@ async function loadExams(options = {}) {
 
   const data = await apiRequest("/admin/exams");
   allExams = data.exams;
+
+  if (silent && isEditingExamDate) {
+    return allExams;
+  }
+
   renderExams(allExams);
   return allExams;
 }
@@ -695,7 +1143,7 @@ async function loadExamData(options = {}) {
       return;
     }
 
-    await Promise.all([loadSubjects(), loadExams()]);
+    await Promise.all([loadSubjects(), loadExams(), loadStudentGroups()]);
   } catch (error) {
     if (silent) {
       return;
@@ -705,6 +1153,380 @@ async function loadExamData(options = {}) {
     variantExamsTableBody.innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
     archiveList.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
   }
+}
+
+function loadAttendanceExamOptions() {
+  loadExams({ silent: true }).then((exams) => {
+    const currentValue = attendanceExam.value;
+    const visibleExams = exams.filter((exam) => exam.status !== "archived");
+
+    attendanceExam.innerHTML = `
+      <option value="">Alege examenul</option>
+      ${visibleExams.map((exam) => `
+        <option value="${exam.id}">${escapeHtml(exam.subject_name)} - ${escapeHtml(exam.title)} (${getStatusText(exam.status)})</option>
+      `).join("")}
+    `;
+
+    if (currentValue && visibleExams.some((exam) => String(exam.id) === String(currentValue))) {
+      attendanceExam.value = currentValue;
+    }
+  }).catch((error) => {
+    setMessage(attendanceMessage, error.message, "error");
+  });
+}
+
+function groupAttendanceByGroup(students) {
+  const groups = new Map();
+
+  students.forEach((student) => {
+    const groupName = student.matriculation_number || "Fara grupa";
+
+    if (!groups.has(groupName)) {
+      groups.set(groupName, []);
+    }
+
+    groups.get(groupName).push(student);
+  });
+
+  return [...groups.entries()].sort(([first], [second]) => first.localeCompare(second, "ro"));
+}
+
+function renderAttendance(data) {
+  currentAttendance = data;
+  attendancePanel.classList.remove("hidden");
+  attendanceTitle.textContent = data.exam.title;
+  attendanceMeta.textContent = `${data.exam.subject_name} | ${formatExamDate(data.exam.exam_date)} | ${getStatusText(data.exam.status)}`;
+  attendanceCounter.textContent = `${data.presentCount} / ${data.totalStudents} prezenti`;
+
+  const groups = groupAttendanceByGroup(data.students || []);
+
+  if (!groups.length) {
+    attendanceGroups.innerHTML = "<p>Nu exista studenti.</p>";
+    return;
+  }
+
+  attendanceGroups.innerHTML = groups.map(([groupName, students], groupIndex) => {
+    const presentInGroup = students.filter((student) => Boolean(student.is_present)).length;
+
+    return `
+      <details class="collapse-group" data-collapse-key="attendance-${escapeHtml(data.exam.id)}-${escapeHtml(encodeURIComponent(groupName))}">
+        <summary class="collapse-summary">
+          <strong>Grupa ${escapeHtml(groupName)}</strong>
+          <span class="muted-note">${presentInGroup} / ${students.length} prezenti</span>
+        </summary>
+        <div>
+          ${students.map((student) => `
+            <div class="attendance-row ${student.is_present ? "is-present" : ""}">
+              <div class="attendance-student">
+                <strong>${escapeHtml(student.full_name)}</strong>
+                <span class="muted-note">${escapeHtml(student.email || "-")}</span>
+              </div>
+              <div class="attendance-actions">
+                <button class="${student.is_present ? "primary-button" : "secondary-button"}" type="button" data-attendance-present="${student.id}">Prezent</button>
+                <button class="${student.is_present ? "secondary-button" : "danger-button"}" type="button" data-attendance-absent="${student.id}">Absent</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </details>
+    `;
+  }).join("");
+}
+
+async function loadAttendance() {
+  if (!attendanceExam.value) {
+    attendancePanel.classList.add("hidden");
+    currentAttendance = null;
+    return;
+  }
+
+  setMessage(attendanceMessage, "Se incarca prezenta...", "");
+
+  try {
+    const data = await apiRequest(`/admin/exams/${attendanceExam.value}/attendance`);
+    renderAttendance(data);
+    setMessage(attendanceMessage, "", "");
+  } catch (error) {
+    setMessage(attendanceMessage, error.message, "error");
+  }
+}
+
+function downloadAttendanceCsv() {
+  if (!currentAttendance) {
+    setMessage(attendanceMessage, "Alege un examen inainte sa descarci prezenta.", "error");
+    return;
+  }
+
+  const rows = [
+    ["Student", "Email", "Grupa", "Prezenta", "Punctaj", "Nota"],
+    ...currentAttendance.students.map((student) => [
+      student.full_name,
+      student.email || "",
+      student.matriculation_number || "",
+      student.is_present ? "Prezent" : "Absent",
+      student.submitted_at ? `${formatPoints(student.score)} / ${formatPoints(student.max_score)}` : "",
+      student.submitted_at ? formatGrade(student.grade) : "",
+    ]),
+  ];
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+    .join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `prezenta-${currentAttendance.exam.title}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function getExamRoomGroups(students) {
+  return [...new Set((students || []).map((student) => student.matriculation_number || "Fara grupa"))]
+    .sort((first, second) => first.localeCompare(second, "ro"));
+}
+
+function getLiveStudentStatus(student) {
+  if (student.restart_request_id) {
+    return {
+      label: student.restart_request_type === "row_change" ? "Cere alt rand" : "Cere reluare",
+      className: "needs-action",
+    };
+  }
+
+  if (student.lock_id) {
+    return { label: "Intrerupt", className: "is-locked" };
+  }
+
+  if (student.submitted_at) {
+    return { label: "Finalizat", className: "is-finished" };
+  }
+
+  if (student.started_at) {
+    return { label: "In test", className: "is-started" };
+  }
+
+  if (student.is_present) {
+    return { label: "Prezent", className: "is-present" };
+  }
+
+  return { label: "Absent", className: "is-absent" };
+}
+
+function getRowToneClass(rowNumber) {
+  const row = Number(rowNumber);
+
+  if (!Number.isInteger(row) || row <= 0) {
+    return "row-tone-empty";
+  }
+
+  return `row-tone-${((row - 1) % 6) + 1}`;
+}
+
+function renderExamRoom(data) {
+  currentExamRoom = data;
+  const groups = getExamRoomGroups(data.students);
+
+  if (!selectedExamRoomGroup || !groups.includes(selectedExamRoomGroup)) {
+    selectedExamRoomGroup = groups[0] || null;
+  }
+
+  examRoomTitle.textContent = data.exam.title;
+  examRoomMeta.textContent = `${data.exam.subject_name} | ${formatExamDate(data.exam.exam_date)} | ${getStatusLabel(data.exam.status)}`;
+  examRoomPresentCount.textContent = `${data.presentCount} prezenti`;
+  examRoomStartButton.disabled = data.exam.status === "active";
+  examRoomStopButton.disabled = data.exam.status !== "active";
+  examRoomGroups.innerHTML = groups.map((group) => {
+    const count = data.students.filter((student) => (student.matriculation_number || "Fara grupa") === group).length;
+    return `
+      <button class="exam-room-group-button ${group === selectedExamRoomGroup ? "active" : ""}" type="button" data-exam-room-group="${escapeHtml(group)}">
+        <span>Grupa ${escapeHtml(group)}</span>
+        <strong>${count}</strong>
+      </button>
+    `;
+  }).join("");
+
+  const students = data.students.filter((student) => (
+    (student.matriculation_number || "Fara grupa") === selectedExamRoomGroup
+  ));
+  examRoomGroupTitle.textContent = selectedExamRoomGroup ? `Grupa ${selectedExamRoomGroup}` : "Studenti";
+  examRoomStats.innerHTML = `
+    <span>${students.filter((student) => student.is_present).length} prezenti</span>
+    <span>${students.filter((student) => student.started_at).length} intrati</span>
+    <span>${students.filter((student) => student.submitted_at).length} finalizati</span>
+  `;
+  examRoomStudents.innerHTML = students.length ? students.map((student) => {
+    const status = getLiveStudentStatus(student);
+    const rowToneClass = getRowToneClass(student.row_number);
+    const rowLabel = student.row_number ? `Rand ${escapeHtml(student.row_number)}` : "Rand neales";
+    const requestLabel = student.restart_request_type === "row_change"
+      ? `Cerere: Rand ${escapeHtml(student.requested_from_row_number || student.row_number || "-")} -> Rand ${escapeHtml(student.requested_to_row_number || "-")}`
+      : "Cerere reluare test";
+    return `
+      <article
+        class="exam-room-student ${status.className}"
+        data-row-label="${escapeHtml(rowLabel)}"
+        data-row-tone="${escapeHtml(rowToneClass)}"
+        data-email="${escapeHtml(student.email || "-")}"
+        data-request-label="${student.restart_request_id ? escapeHtml(requestLabel) : ""}"
+      >
+        <div class="exam-room-student-main">
+          <strong>${escapeHtml(student.full_name)}</strong>
+          <span class="muted-note">
+            ${escapeHtml(student.email || "-")} · ${student.row_number ? `Rand ${escapeHtml(student.row_number)}` : "Rand neales"}
+          </span>
+        </div>
+        <span class="live-status">${status.label}</span>
+        <span>${student.started_at ? formatExamDate(student.started_at) : "Nu a intrat"}</span>
+        <span>${student.submitted_at ? `${formatPoints(student.score)} / ${formatPoints(student.max_score)}` : "-"}</span>
+        <div class="exam-room-student-actions">
+          <button class="${student.is_present ? "primary-button" : "secondary-button"}" type="button" data-room-present="${student.id}">Prezent</button>
+          <button class="${student.is_present ? "secondary-button" : "danger-button"}" type="button" data-room-absent="${student.id}">Absent</button>
+          ${student.lock_id ? `<button class="secondary-button" type="button" data-room-release-lock="${student.lock_id}">Permite continuarea</button>` : ""}
+          ${student.restart_request_id ? `<button class="primary-button" type="button" data-room-approve-restart="${student.restart_request_id}">
+            ${student.restart_request_type === "row_change" ? "Accepta schimbarea randului" : "Accepta reluarea"}
+          </button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("") : '<p class="muted-note">Nu exista studenti in aceasta grupa.</p>';
+
+  examRoomStudents.querySelectorAll(".exam-room-student[data-row-label]").forEach((studentCard) => {
+    const meta = studentCard.querySelector(".exam-room-student-main .muted-note");
+
+    if (!meta) {
+      return;
+    }
+
+    meta.classList.add("exam-room-student-meta");
+    meta.innerHTML = `
+      <span>${escapeHtml(studentCard.dataset.email || "-")}</span>
+      <span class="row-badge ${escapeHtml(studentCard.dataset.rowTone || "row-tone-empty")}">${escapeHtml(studentCard.dataset.rowLabel || "Rand neales")}</span>
+      ${studentCard.dataset.requestLabel ? `<span class="row-change-warning">${escapeHtml(studentCard.dataset.requestLabel)}</span>` : ""}
+    `;
+  });
+}
+
+async function loadExamRoom(options = {}) {
+  if (!currentExamRoom?.exam?.id) {
+    return;
+  }
+
+  try {
+    const data = await apiRequest(`/admin/exams/${currentExamRoom.exam.id}/live`);
+    renderExamRoom(data);
+
+    if (!options.silent) {
+      setMessage(examRoomMessage, "", "");
+    }
+  } catch (error) {
+    setMessage(examRoomMessage, error.message, "error");
+  }
+}
+
+async function openExamRoom(examId) {
+  activeSectionId = "examRoomSection";
+  adminMenuSection.classList.add("hidden");
+  dashboardSections.forEach((section) => section.classList.add("hidden"));
+  examRoomSection.classList.remove("hidden");
+  professorName.textContent = "Examen in desfasurare";
+  currentExamRoom = { exam: { id: Number(examId) } };
+  selectedExamRoomGroup = null;
+  examRoomStudents.innerHTML = '<p class="muted-note">Se incarca situatia examenului...</p>';
+  await loadExamRoom();
+}
+
+function downloadExcelTable(rows, fileName, title = "") {
+  const tableRows = rows.map((row, rowIndex) => `
+    <tr>
+      ${row.map((cell) => (
+        rowIndex === 0
+          ? `<th>${escapeHtml(cell)}</th>`
+          : `<td>${escapeHtml(cell)}</td>`
+      )).join("")}
+    </tr>
+  `).join("");
+  const html = `
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; }
+          h2 { margin: 0 0 14px; color: #1f2937; }
+          table { border-collapse: collapse; font-family: Arial, sans-serif; }
+          th { background: #d9eaf7; font-weight: bold; }
+          th, td { border: 1px solid #7f8c99; padding: 8px 10px; }
+          .present { background: #dcfce7; }
+          .absent { background: #fee2e2; }
+          .finished { background: #ede9fe; }
+          .started { background: #dbeafe; }
+          .attention { background: #fef3c7; }
+        </style>
+      </head>
+      <body>
+        ${title ? `<h2>${escapeHtml(title)}</h2>` : ""}
+        <table>${tableRows}</table>
+      </body>
+    </html>
+  `;
+  const blob = new Blob([html], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+  const link = document.createElement("a");
+  const safeName = String(fileName || "export")
+    .replace(/[^\w\-]+/g, "_")
+    .replace(/_+/g, "_");
+
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safeName}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+function downloadExamRoomAttendance() {
+  if (!currentExamRoom) {
+    return;
+  }
+
+  const exam = currentExamRoom.exam || {};
+  const rows = [
+    [
+      "Nume student",
+      "Email",
+      "Grupa",
+      "Materie",
+      "Examen",
+      "Varianta",
+      "Rand",
+      "Prezenta",
+      "Status",
+      "Intrare",
+      "Finalizare",
+      "Punctaj",
+      "Nota",
+    ],
+    ...currentExamRoom.students.map((student) => [
+      student.full_name,
+      student.email || "",
+      student.matriculation_number || "",
+      exam.subject_name || "",
+      exam.title || "",
+      student.variant_name || "-",
+      student.row_number || "-",
+      student.is_present ? "Prezent" : "Absent",
+      getLiveStudentStatus(student).label,
+      student.started_at ? formatExamDate(student.started_at) : "",
+      student.submitted_at ? formatExamDate(student.submitted_at) : "",
+      student.submitted_at ? `${formatPoints(student.score)} / ${formatPoints(student.max_score)}` : "",
+      student.submitted_at ? (isPlagiarismResult(student) ? "Plagiat" : formatGrade(student.grade)) : "",
+    ]),
+  ];
+
+  downloadExcelTable(
+    rows,
+    `registru_live_${exam.subject_name || "materie"}_${exam.title || "examen"}`,
+    `${exam.subject_name || "Materie"} - ${exam.title || "Examen"}`,
+  );
 }
 
 async function loadRtfExams() {
@@ -764,7 +1586,7 @@ function renderResultExamList(results) {
       : null;
 
     return `
-      <button class="exam-card result-exam-card" type="button" data-open-result-exam="${group.exam_id}">
+      <article class="exam-card result-exam-card">
         <div>
           <h3>${escapeHtml(group.exam_title)}</h3>
           <div class="exam-card-meta">
@@ -773,10 +1595,15 @@ function renderResultExamList(results) {
             <span>${group.results.length} rezultate</span>
           </div>
         </div>
-        <span class="status-badge ${average === null ? "status-plagiarism" : "status-active"}">
-          ${average === null ? "Fara note" : `Media ${escapeHtml(Number(average.toFixed(2)))}`}
-        </span>
-      </button>
+        <div class="result-exam-actions">
+          <span class="status-badge ${average === null ? "status-plagiarism" : "status-active"}">
+            ${average === null ? "Fara note" : `Media ${escapeHtml(formatGrade(average))}`}
+          </span>
+          <button class="secondary-button" type="button" data-open-result-exam="${group.exam_id}">
+            Deschide rezultatele
+          </button>
+        </div>
+      </article>
     `;
   }).join("");
 
@@ -809,26 +1636,64 @@ function renderResultsForExam(examId, options = {}) {
 
   examResultsTitle.textContent = `Rezultate - ${group.exam_title}`;
   examResultsMeta.textContent = `${group.subject_name} | ${formatExamDate(group.exam_date)} | ${group.results.length} rezultate`;
-  resultsTableBody.innerHTML = group.results.map((result) => `
-    <tr>
-      <td>${escapeHtml(result.student_name)}</td>
-      <td>${escapeHtml(result.subject_name)}</td>
-      <td>${escapeHtml(result.exam_title)}</td>
-      <td>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)}</td>
-      <td>${renderGradeBadge(result)}</td>
-      <td>${formatExamDate(result.submitted_at)}</td>
-      <td>
-        <div class="action-row">
-          ${Number(result.event_count || 0) > 0 ? `
-            <span class="problem-indicator" title="Exista evenimente in timpul testului">!</span>
-          ` : ""}
-          <button class="secondary-button" type="button" data-result-details="${result.id}">
-            Detalii
-          </button>
+  const resultGroups = new Map();
+
+  group.results.forEach((result) => {
+    const groupName = result.matriculation_number || "Fara grupa";
+
+    if (!resultGroups.has(groupName)) {
+      resultGroups.set(groupName, []);
+    }
+
+    resultGroups.get(groupName).push(result);
+  });
+
+  resultsTableBody.innerHTML = [...resultGroups.entries()]
+    .sort(([first], [second]) => first.localeCompare(second, "ro"))
+    .map(([groupName, results]) => `
+      <details class="collapse-group user-group result-group" data-collapse-key="results-${escapeHtml(group.exam_id)}-${escapeHtml(encodeURIComponent(groupName))}">
+        <summary class="collapse-summary user-group-summary">
+          <span class="user-group-title">
+            <strong>Grupa ${escapeHtml(groupName)}</strong>
+            <span class="selection-count">${results.length}</span>
+          </span>
+          <span class="muted-note">${results.length === 1 ? "1 rezultat" : `${results.length} rezultate`}</span>
+        </summary>
+        <div class="table-wrap user-group-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Punctaj</th>
+                <th>Nota</th>
+                <th>Trimis la</th>
+                <th>Actiuni</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${results.map((result) => `
+                <tr>
+                  <td><strong>${escapeHtml(result.student_name)}</strong></td>
+                  <td>${escapeHtml(formatPoints(result.score))} / ${escapeHtml(formatPoints(result.max_score))}</td>
+                  <td>${renderGradeBadge(result)}</td>
+                  <td>${formatExamDate(result.submitted_at)}</td>
+                  <td>
+                    <div class="action-row">
+                      ${Number(result.event_count || 0) > 0 ? `
+                        <span class="problem-indicator" title="Exista evenimente in timpul testului">!</span>
+                      ` : ""}
+                      <button class="secondary-button" type="button" data-result-details="${result.id}">
+                        Detalii
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
         </div>
-      </td>
-    </tr>
-  `).join("");
+      </details>
+    `).join("");
 }
 
 async function ensureResultsLoaded() {
@@ -861,8 +1726,8 @@ async function downloadArchiveRegister(examId) {
       result.exam_title,
       result.variant_name || "-",
       result.row_number || "-",
-      `${result.score} / ${result.max_score}`,
-      isPlagiarismResult(result) ? "Plagiat" : result.grade,
+      `${formatPoints(result.score)} / ${formatPoints(result.max_score)}`,
+      isPlagiarismResult(result) ? "Plagiat" : formatGrade(result.grade),
     ]),
   ];
   const tableRows = rows.map((row, rowIndex) => `
@@ -937,7 +1802,7 @@ function renderGradeBadge(result) {
     return '<span class="status-badge status-plagiarism">Plagiat</span>';
   }
 
-  return `<span class="status-badge status-active">${escapeHtml(result.grade)}</span>`;
+  return `<span class="status-badge status-active">${escapeHtml(formatGrade(result.grade))}</span>`;
 }
 
 function renderTestLockNotifications() {
@@ -1077,10 +1942,10 @@ function getReviewAnswerState(answer) {
 function renderResultDetails(data) {
   const result = data.result;
   const events = data.events || [];
-  const gradeText = isPlagiarismResult(result) ? "Plagiat" : `Nota ${result.grade}`;
+  const gradeText = isPlagiarismResult(result) ? "Plagiat" : `Nota ${formatGrade(result.grade)}`;
 
   resultDetailsTitle.textContent = `${result.student_name} - ${result.exam_title}`;
-  resultDetailsMeta.textContent = `${result.subject_name} | ${result.variant_name || "Varianta neidentificata"} | ${result.score} / ${result.max_score} puncte | ${gradeText}`;
+  resultDetailsMeta.textContent = `${result.subject_name} | ${result.variant_name || "Varianta neidentificata"} | ${formatPoints(result.score)} / ${formatPoints(result.max_score)} puncte | ${gradeText}`;
   resultDetailsContent.innerHTML = `
     ${events.length ? `
       <article class="review-question-card">
@@ -1158,6 +2023,25 @@ async function openResultDetails(resultId) {
   }
 }
 
+function formatImportWarnings(data) {
+  const missingCorrectWarning = (data.warnings || [])
+    .find((warning) => warning.type === "missing_correct_answers");
+
+  if (!missingCorrectWarning) {
+    return "";
+  }
+
+  const labels = missingCorrectWarning.questions
+    .slice(0, 8)
+    .map((question) => {
+      const rowLabel = question.rowNumber ? `Rand ${question.rowNumber}` : question.variantName;
+      return `${rowLabel}, intrebarea ${question.questionNumber}`;
+    });
+  const remaining = missingCorrectWarning.questions.length - labels.length;
+
+  return ` Atentie: ${missingCorrectWarning.message} Probleme: ${labels.join("; ")}${remaining > 0 ? ` si inca ${remaining}` : ""}.`;
+}
+
 /*
 ----------------------------
       Variante si intrebari
@@ -1181,17 +2065,24 @@ function renderVariantsList() {
     return;
   }
 
-  variantsList.innerHTML = selectedExamVariants.map((variant) => `
-    <article class="variant-block">
-      <div class="variant-block-header">
-        <h3>${escapeHtml(variant.variant_name)}${variant.row_number ? ` - Rand ${escapeHtml(variant.row_number)}` : ""}</h3>
-        <button class="danger-button" type="button" data-delete-variant="${variant.id}">Sterge varianta</button>
-      </div>
-      <div class="question-list">
+  variantsList.innerHTML = selectedExamVariants.map((variant, variantIndex) => `
+    <details class="variant-block" data-collapse-key="variants-${escapeHtml(selectedExamForVariants?.id || "exam")}-${escapeHtml(variant.id)}">
+      <summary class="variant-summary">
+        <span class="variant-summary-content">
+          <strong>${escapeHtml(variant.variant_name)}${variant.row_number ? ` - Rand ${escapeHtml(variant.row_number)}` : ""}</strong>
+          <span class="muted-note">${escapeHtml(variant.questions.length)} intrebari</span>
+        </span>
+      </summary>
+      <div class="variant-block-body">
+        <div class="variant-block-header">
+          <span class="muted-note">Verifica intrebarile si raspunsurile importate.</span>
+          <button class="danger-button" type="button" data-delete-variant="${variant.id}">Sterge varianta</button>
+        </div>
+        <div class="question-list">
         ${variant.questions.length ? variant.questions.map((question, questionIndex) => `
           <div class="question-item">
             <strong>${escapeHtml(questionIndex + 1)}. ${escapeHtml(question.question_text)}</strong>
-            <span class="muted-note">(${escapeHtml(question.points)} puncte)</span>
+            <span class="muted-note">(${escapeHtml(formatPoints(question.points))} puncte)</span>
             ${renderQuestionImages(question)}
             <ol class="answer-list">
               ${question.answers.map((answer) => `
@@ -1202,8 +2093,9 @@ function renderVariantsList() {
             </ol>
           </div>
         `).join("") : "<p>Nu exista intrebari pentru aceasta varianta.</p>"}
+        </div>
       </div>
-    </article>
+    </details>
   `).join("");
 }
 
@@ -1282,10 +2174,9 @@ async function loadAssignments() {
     const data = await apiRequest(`/admin/exams/${selectedExamForAssignments.id}/assignments`);
     assignmentVariants = data.variants;
     assignmentsReadOnly = Boolean(data.readOnly);
-    randomAssignmentsButton.classList.toggle("hidden", assignmentsReadOnly);
     assignmentsPanelDescription.textContent = assignmentsReadOnly
       ? "Examen arhivat: poti vedea asignarile, dar nu le mai poti modifica."
-      : "Alege manual varianta sau foloseste asignarea random. Modificarile se salveaza automat.";
+      : "Alege manual varianta pentru studentii care au nevoie de asignare individuala. Modificarile se salveaza automat.";
     renderAssignments(data.students);
   } catch (error) {
     assignmentsTableBody.innerHTML = `<tr><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
@@ -1311,10 +2202,37 @@ logoutButton.addEventListener("click", () => {
   window.location.href = "login.html";
 });
 
+dashboardThemeSelect?.addEventListener("change", () => {
+  localStorage.setItem("dashboardTheme", dashboardThemeSelect.value);
+  applyDashboardTheme(dashboardThemeSelect.value);
+});
+
 refreshUsersButton.addEventListener("click", loadUsers);
 refreshExamsButton.addEventListener("click", loadExamData);
 refreshResultsButton.addEventListener("click", loadResults);
 roleSelect.addEventListener("change", updateRoleFields);
+attendanceExam?.addEventListener("change", loadAttendance);
+refreshAttendanceButton?.addEventListener("click", loadAttendance);
+downloadAttendanceButton?.addEventListener("click", downloadAttendanceCsv);
+attendanceGroups?.addEventListener("click", async (event) => {
+  const presentButton = event.target.closest("[data-attendance-present]");
+  const absentButton = event.target.closest("[data-attendance-absent]");
+  const studentId = presentButton?.dataset.attendancePresent || absentButton?.dataset.attendanceAbsent;
+
+  if (!studentId || !attendanceExam.value) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/admin/exams/${attendanceExam.value}/attendance/${studentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ isPresent: Boolean(presentButton) }),
+    });
+    await loadAttendance();
+  } catch (error) {
+    setMessage(attendanceMessage, error.message, "error");
+  }
+});
 
 createUserForm.addEventListener("change", (event) => {
   if (event.target.name !== "uniqueCodeMode") {
@@ -1330,6 +2248,16 @@ createUserForm.addEventListener("change", (event) => {
     uniqueCodeInput.value = "";
     uniqueCodeInput.readOnly = false;
     uniqueCodeInput.focus();
+  }
+});
+
+createExamForm.addEventListener("change", (event) => {
+  if (event.target.name === "examGroup") {
+    updateSelectedExamGroupsPanel();
+  }
+
+  if (event.target.name === "examOwner") {
+    updateSelectedExamOwnersPanel();
   }
 });
 
@@ -1460,6 +2388,7 @@ usersTableBody.addEventListener("click", async (event) => {
   const groupButton = event.target.closest("[data-delete-group]");
 
   if (groupButton) {
+    event.preventDefault();
     const groupName = groupButton.dataset.deleteGroup;
     const confirmed = window.confirm(`Esti sigur ca vrei sa stergi toata grupa ${groupName}? Se vor sterge toti studentii din grupa si toate datele lor.`);
 
@@ -1699,6 +2628,10 @@ createExamForm.addEventListener("submit", async (event) => {
     title: formData.get("examTitle").trim(),
     examDate: formData.get("examDate"),
     bonusPoints: formData.get("bonusPoints"),
+    groups: [...createExamForm.querySelectorAll('input[name="examGroup"]:checked')]
+      .map((input) => input.value),
+    ownerIds: [...createExamForm.querySelectorAll('input[name="examOwner"]:checked')]
+      .map((input) => input.value),
   };
 
   try {
@@ -1707,6 +2640,8 @@ createExamForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     createExamForm.reset();
+    updateSelectedExamGroupsPanel();
+    updateSelectedExamOwnersPanel();
     setMessage(createExamMessage, "Examen salvat.", "success");
     await loadExamData();
   } catch (error) {
@@ -1719,8 +2654,38 @@ createExamForm.addEventListener("submit", async (event) => {
     Actiuni pe tabele examene
 ----------------------------
 */
-// Asculta click-urile din tabele si decide ce actiune se executa: status, arhivare, variante, asignari sau stergere.
+// Asculta click-urile din tabele si decide ce actiune se executa: status, arhivare, variante sau stergere.
 async function handleExamTableClick(event) {
+  const roomButton = event.target.closest("[data-open-exam-room]");
+
+  if (roomButton) {
+    await openExamRoom(roomButton.dataset.openExamRoom);
+    return;
+  }
+
+  const openDateButton = event.target.closest("[data-open-exam-date]");
+
+  if (openDateButton) {
+    const examId = openDateButton.dataset.openExamDate;
+    const input = event.currentTarget.querySelector(`[data-exam-date-input="${examId}"]`);
+
+    if (input) {
+      input.focus({ preventScroll: true });
+
+      try {
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+        } else {
+          input.click();
+        }
+      } catch {
+        input.click();
+      }
+    }
+
+    return;
+  }
+
   const downloadButton = event.target.closest("[data-download-archive]");
 
   if (downloadButton) {
@@ -1732,13 +2697,6 @@ async function handleExamTableClick(event) {
 
   if (variantsButton) {
     await openVariantsPanel(variantsButton.dataset.manageVariants);
-    return;
-  }
-
-  const assignmentsButton = event.target.closest("[data-manage-assignments]");
-
-  if (assignmentsButton) {
-    await openAssignmentsPanel(assignmentsButton.dataset.manageAssignments);
     return;
   }
 
@@ -1791,8 +2749,99 @@ async function handleExamTableClick(event) {
 }
 
 examsTableBody.addEventListener("click", handleExamTableClick);
+examsTableBody.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-exam-date-input]");
+
+  if (input) {
+    examDateDrafts.set(String(input.dataset.examDateInput), input.value);
+  }
+});
+examsTableBody.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-exam-date-input]");
+
+  if (!input || !input.value) {
+    return;
+  }
+
+  const examId = String(input.dataset.examDateInput);
+  const selectedDate = input.value;
+  examDateDrafts.set(examId, selectedDate);
+  input.disabled = true;
+
+  apiRequest(`/admin/exams/${examId}/date`, {
+    method: "PATCH",
+    body: JSON.stringify({ examDate: selectedDate }),
+  }).then(async () => {
+    examDateDrafts.delete(examId);
+    setMessage(createExamMessage, "Data examenului a fost actualizata automat.", "success");
+    await loadExams();
+  }).catch((error) => {
+    input.disabled = false;
+    setMessage(createExamMessage, error.message, "error");
+  });
+});
 variantExamsTableBody.addEventListener("click", handleExamTableClick);
 archiveList.addEventListener("click", handleExamTableClick);
+examRoomGroups.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-exam-room-group]");
+
+  if (!button || !currentExamRoom) {
+    return;
+  }
+
+  selectedExamRoomGroup = button.dataset.examRoomGroup;
+  renderExamRoom(currentExamRoom);
+});
+examRoomStudents.addEventListener("click", async (event) => {
+  const presentButton = event.target.closest("[data-room-present]");
+  const absentButton = event.target.closest("[data-room-absent]");
+  const releaseButton = event.target.closest("[data-room-release-lock]");
+  const restartButton = event.target.closest("[data-room-approve-restart]");
+
+  try {
+    if (presentButton || absentButton) {
+      const studentId = presentButton?.dataset.roomPresent || absentButton?.dataset.roomAbsent;
+      await apiRequest(`/admin/exams/${currentExamRoom.exam.id}/attendance/${studentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isPresent: Boolean(presentButton) }),
+      });
+    } else if (releaseButton) {
+      await apiRequest(`/admin/test-locks/${releaseButton.dataset.roomReleaseLock}/release`, { method: "POST" });
+    } else if (restartButton) {
+      await apiRequest(`/admin/restart-requests/${restartButton.dataset.roomApproveRestart}/approve`, { method: "POST" });
+    } else {
+      return;
+    }
+
+    await loadExamRoom({ silent: true });
+  } catch (error) {
+    setMessage(examRoomMessage, error.message, "error");
+  }
+});
+examRoomStartButton.addEventListener("click", async () => {
+  try {
+    await apiRequest(`/admin/exams/${currentExamRoom.exam.id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "active" }),
+    });
+    await loadExamRoom({ silent: true });
+  } catch (error) {
+    setMessage(examRoomMessage, error.message, "error");
+  }
+});
+examRoomStopButton.addEventListener("click", async () => {
+  try {
+    await apiRequest(`/admin/exams/${currentExamRoom.exam.id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "finished" }),
+    });
+    await loadExamRoom({ silent: true });
+  } catch (error) {
+    setMessage(examRoomMessage, error.message, "error");
+  }
+});
+examRoomDownloadButton.addEventListener("click", downloadExamRoomAttendance);
+closeExamRoomButton.addEventListener("click", () => showDashboardSection("examsSection"));
 refreshVariantExamsButton.addEventListener("click", () => loadExams());
 refreshArchiveButton.addEventListener("click", () => {
   loadExams();
@@ -1837,30 +2886,6 @@ assignmentsTableBody.addEventListener("change", async (event) => {
   } catch (error) {
     setMessage(assignmentsMessage, error.message, "error");
     await loadAssignments();
-  }
-});
-
-randomAssignmentsButton.addEventListener("click", async () => {
-  if (!selectedExamForAssignments || assignmentsReadOnly) {
-    return;
-  }
-
-  const confirmed = window.confirm("Vrei sa asignezi random variantele pentru studentii care nu au trimis deja testul?");
-
-  if (!confirmed) {
-    return;
-  }
-
-  setMessage(assignmentsMessage, "Se asigneaza random...", "");
-
-  try {
-    const data = await apiRequest(`/admin/exams/${selectedExamForAssignments.id}/assignments/random`, {
-      method: "POST",
-    });
-    setMessage(assignmentsMessage, `Asignare random salvata pentru ${data.assignedStudents} studenti.`, "success");
-    await loadAssignments();
-  } catch (error) {
-    setMessage(assignmentsMessage, error.message, "error");
   }
 });
 
@@ -1922,8 +2947,8 @@ variantRtfImportForm.addEventListener("submit", async (event) => {
     variantRtfImportForm.reset();
     setMessage(
       variantRtfImportMessage,
-      `Import reusit: ${data.importedVariants} variante noi, ${data.importedQuestions} intrebari.`,
-      "success",
+      `Import reusit: ${data.importedVariants} variante noi, ${data.importedQuestions} intrebari.${formatImportWarnings(data)}`,
+      data.warnings?.length ? "warning" : "success",
     );
     await loadVariants();
     await loadExams({ silent: true });
@@ -2022,8 +3047,8 @@ rtfImportForm.addEventListener("submit", async (event) => {
     rtfImportForm.reset();
     setMessage(
       rtfImportMessage,
-      `Import reusit: ${data.importedVariants} variante noi, ${data.importedQuestions} intrebari.`,
-      "success",
+      `Import reusit: ${data.importedVariants} variante noi, ${data.importedQuestions} intrebari.${formatImportWarnings(data)}`,
+      data.warnings?.length ? "warning" : "success",
     );
   } catch (error) {
     setMessage(rtfImportMessage, error.message, "error");
@@ -2049,6 +3074,10 @@ setInterval(() => {
 
   if (activeSectionId === "resultsSection") {
     loadResults({ silent: true });
+  }
+
+  if (activeSectionId === "examRoomSection") {
+    loadExamRoom({ silent: true });
   }
 
   loadActiveTestLocks();

@@ -24,6 +24,7 @@ const solveTestForm = document.getElementById("solveTestForm");
 const solveTestTitle = document.getElementById("solveTestTitle");
 const solveTestMeta = document.getElementById("solveTestMeta");
 const solveTestMessage = document.getElementById("solveTestMessage");
+const solveTestPanel = document.getElementById("solveTestPanel");
 const studentCalendarList = document.getElementById("studentCalendarList");
 const studentHistoryList = document.getElementById("studentHistoryList");
 const studentAnnouncementsList = document.getElementById("studentAnnouncementsList");
@@ -48,6 +49,8 @@ let lastEventLogAt = new Map();
 let isSubmittingTest = false;
 let serverTestLockActive = false;
 let localTestLockPending = false;
+let fullscreenRequestPending = false;
+const openStudentHistorySubjects = new Set();
 
 if (user) {
   studentName.textContent = user.full_name || "Student";
@@ -59,6 +62,84 @@ logoutButton.addEventListener("click", () => {
     window.location.href = "login.html";
   });
 });
+
+const studentPanelStorageKey = `exam-platform-collapses-${user?.id || "student"}`;
+
+function getStudentPanelStates() {
+  try {
+    return JSON.parse(localStorage.getItem(studentPanelStorageKey) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function initializeStudentCollapsiblePanels() {
+  const savedStates = getStudentPanelStates();
+  const panels = document.querySelectorAll(
+    ".student-main-section.panel, #studentSubjectsSection .panel, .student-subsection.panel:not(#solveTestPanel)",
+  );
+
+  panels.forEach((panel, panelIndex) => {
+    if (panel.dataset.panelCollapseInitialized === "true") {
+      return;
+    }
+
+    const heading = [...panel.children].find((item) => item.classList?.contains("section-heading"));
+
+    if (!heading) {
+      return;
+    }
+
+    const title = heading.querySelector("h2")?.textContent.trim() || `panou-${panelIndex + 1}`;
+    const normalizedTitle = title.toLocaleLowerCase("ro")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const owner = panel.closest("[id]")?.id || "student";
+    const key = `panel-${owner}-${normalizedTitle || panelIndex + 1}`;
+    const toggle = document.createElement("button");
+
+    panel.classList.add("collapsible-panel");
+    panel.dataset.panelCollapseInitialized = "true";
+    heading.classList.add("collapsible-panel-heading");
+    toggle.className = "panel-collapse-toggle";
+    toggle.type = "button";
+    toggle.setAttribute("aria-label", `Extinde sau restrange ${title}`);
+    toggle.innerHTML = '<span aria-hidden="true">−</span>';
+    heading.appendChild(toggle);
+
+    const setPanelOpen = (isOpen, persist = true) => {
+      panel.classList.toggle("is-collapsed", !isOpen);
+      toggle.setAttribute("aria-expanded", String(isOpen));
+      toggle.querySelector("span").textContent = isOpen ? "−" : "+";
+
+      if (persist) {
+        const currentStates = getStudentPanelStates();
+        currentStates[key] = isOpen;
+        localStorage.setItem(studentPanelStorageKey, JSON.stringify(currentStates));
+      }
+    };
+
+    const initialOpen = Object.prototype.hasOwnProperty.call(savedStates, key)
+      ? Boolean(savedStates[key])
+      : true;
+    setPanelOpen(initialOpen, false);
+
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setPanelOpen(panel.classList.contains("is-collapsed"));
+    });
+
+    heading.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea, label")) {
+        return;
+      }
+
+      setPanelOpen(panel.classList.contains("is-collapsed"));
+    });
+  });
+}
 
 /*
 ----------------------------
@@ -131,6 +212,37 @@ function formatExamDate(value) {
   });
 }
 
+function formatPoints(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "0.00";
+}
+
+function formatGrade(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "0.00";
+}
+
+function getRowToneClass(rowNumber) {
+  const row = Number(rowNumber);
+
+  if (!Number.isInteger(row) || row <= 0) {
+    return "row-tone-empty";
+  }
+
+  return `row-tone-${((row - 1) % 6) + 1}`;
+}
+
+function setStudentTestMode(isActive, rowNumber = null) {
+  document.body.classList.toggle("student-test-mode", Boolean(isActive));
+
+  if (isActive) {
+    const row = Number(rowNumber);
+    document.body.dataset.testRow = Number.isInteger(row) ? String(row) : "";
+  } else {
+    delete document.body.dataset.testRow;
+  }
+}
+
 function getStatusText(status) {
   if (status === "future") {
     return "Programat";
@@ -155,7 +267,7 @@ function renderStudentGradeBadge(result) {
     return '<span class="status-badge status-plagiarism">Plagiat</span>';
   }
 
-  return `<span class="status-badge status-active">Nota ${escapeHtml(result.grade)}</span>`;
+  return `<span class="status-badge status-active">Nota ${escapeHtml(formatGrade(result.grade))}</span>`;
 }
 
 function groupSubjects(subjects, exams) {
@@ -192,7 +304,7 @@ function groupSubjects(subjects, exams) {
 
 /*
 ----------------------------
-          Materiile mele
+          Examene
 ----------------------------
 Afiseaza materiile disponibile studentului si numara examenele pe status.
 */
@@ -242,7 +354,12 @@ function renderExamList(container, exams, emptyText) {
         ${renderExamRowPicker(exam)}
       ` : ""}
       ${exam.status === "active" && exam.has_result ? `
-        <span class="muted-note">Trimis deja</span>
+        <div class="exam-start-controls">
+          <span class="muted-note">Trimis deja</span>
+          <button class="secondary-button" type="button" data-request-restart="${exam.id}" ${exam.has_restart_request ? "disabled" : ""}>
+            ${exam.has_restart_request ? "Cerere trimisa" : "Solicita reluarea"}
+          </button>
+        </div>
       ` : ""}
     </article>
   `).join("");
@@ -293,7 +410,7 @@ function renderExamRowPicker(exam) {
         data-start-test="${exam.id}"
         ${hasSelectedRow ? "" : "disabled"}
       >
-        Rezolva
+        Intrare in examen
       </button>
     </div>
   `;
@@ -349,21 +466,65 @@ function renderGlobalStudentPanels() {
     `).join("")
     : "<p>Nu exista examene viitoare sau active.</p>";
 
+  const resultsBySubject = new Map();
+
+  studentResults.forEach((result) => {
+    const key = String(result.subject_id || result.subject_name || "fara-materie");
+
+    if (!resultsBySubject.has(key)) {
+      resultsBySubject.set(key, {
+        name: result.subject_name || "Fara materie",
+        results: [],
+      });
+    }
+
+    resultsBySubject.get(key).results.push(result);
+  });
+
   studentHistoryList.innerHTML = studentResults.length
-    ? studentResults.map((result) => `
-      <article class="exam-card">
-        <div>
-          <h3>${escapeHtml(result.title)}</h3>
-          <div class="exam-card-meta">
-            <span>${escapeHtml(result.subject_name)}</span>
-            <span>${formatExamDate(result.submitted_at)}</span>
-            <span>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)} puncte</span>
+    ? [...resultsBySubject.entries()]
+      .sort(([, first], [, second]) => first.name.localeCompare(second.name, "ro"))
+      .map(([subjectKey, subject]) => `
+        <details
+          class="student-history-subject"
+          data-student-history-subject="${escapeHtml(subjectKey)}"
+          ${openStudentHistorySubjects.has(subjectKey) ? "open" : ""}
+        >
+          <summary class="student-history-summary">
+            <span>
+              <strong>${escapeHtml(subject.name)}</strong>
+              <span class="muted-note">${subject.results.length === 1 ? "1 nota" : `${subject.results.length} note`}</span>
+            </span>
+          </summary>
+          <div class="student-history-results">
+            ${subject.results.map((result) => `
+              <article class="exam-card">
+                <div>
+                  <h3>${escapeHtml(result.title)}</h3>
+                  <div class="exam-card-meta">
+                    <span>${formatExamDate(result.submitted_at)}</span>
+                    <span>${escapeHtml(formatPoints(result.score))} / ${escapeHtml(formatPoints(result.max_score))} puncte</span>
+                  </div>
+                </div>
+                ${renderStudentGradeBadge(result)}
+              </article>
+            `).join("")}
           </div>
-        </div>
-        ${renderStudentGradeBadge(result)}
-      </article>
-    `).join("")
+        </details>
+      `).join("")
     : "<p>Nu exista note salvate.</p>";
+
+  studentHistoryList.querySelectorAll("[data-student-history-subject]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const key = details.dataset.studentHistorySubject;
+
+      if (details.open) {
+        openStudentHistorySubjects.add(key);
+      } else {
+        openStudentHistorySubjects.delete(key);
+      }
+    });
+  });
 
   const subjectsWithAnnouncements = subjectGroups
     .filter((subject) => subject.info && subject.info.trim());
@@ -438,8 +599,20 @@ function renderGlobalStudentPanels() {
 }
 
 function showStudentMainSection(sectionId) {
+  studentQuickMenuSection.classList.add("hidden");
+  studentSubjectMenuSection.classList.add("hidden");
+
   document.querySelectorAll(".student-main-section").forEach((section) => {
     section.classList.toggle("hidden", section.id !== sectionId);
+  });
+}
+
+function showStudentQuickMenu() {
+  studentQuickMenuSection.classList.remove("hidden");
+  studentSubjectMenuSection.classList.add("hidden");
+
+  document.querySelectorAll(".student-main-section").forEach((section) => {
+    section.classList.add("hidden");
   });
 }
 
@@ -467,6 +640,8 @@ function openSubject(subjectId) {
     : "Nu exista informatii publicate pentru aceasta materie.";
 
   renderSelectedSubjectExams();
+  document.getElementById("futureExamsCollapse").open = false;
+  document.getElementById("finishedExamsCollapse").open = false;
 
   studentQuickMenuSection.classList.add("hidden");
   studentSubjectsSection.classList.add("hidden");
@@ -512,7 +687,7 @@ function renderStudentResults() {
         <div class="exam-card-meta">
           <span>${escapeHtml(result.subject_name)}</span>
           <span>${formatExamDate(result.submitted_at)}</span>
-          <span>${escapeHtml(result.score)} / ${escapeHtml(result.max_score)} puncte</span>
+          <span>${escapeHtml(formatPoints(result.score))} / ${escapeHtml(formatPoints(result.max_score))} puncte</span>
           <span>Raspunsuri corecte: ${escapeHtml(result.correct_answers_count || 0)}</span>
           <span>Raspunsuri gresite selectate: ${escapeHtml(result.wrong_answers_count || 0)}</span>
         </div>
@@ -530,8 +705,9 @@ Randarea testului creeaza intrebarile, raspunsurile selectabile si regulile de e
 */
 function renderTestForm(test) {
   solveTestTitle.textContent = test.exam.title;
-  solveTestMeta.textContent = `${test.exam.subject_name} - ${test.variant.variant_name}`;
+  solveTestMeta.textContent = "";
   selectedAnswersByQuestion = new Map();
+  const rowToneClass = getRowToneClass(test.variant?.row_number);
 
   if (!test.questions.length) {
     solveTestForm.innerHTML = "<p>Acest test nu are intrebari.</p>";
@@ -539,22 +715,14 @@ function renderTestForm(test) {
   }
 
   solveTestForm.innerHTML = `
-    <section class="test-question">
-      <div class="question-title">
-        <strong>Reguli examen</strong>
-      </div>
-      <p class="preserve-lines">${
-        escapeHtml(test.exam.subject_rules || "Citeste intrebarile atent. Dupa trimitere, testul nu mai poate fi modificat.")
-      }</p>
-    </section>
     <p class="message form-message">
       Raspunsuri selectate: <strong id="selectedAnswersCount">0</strong>
     </p>
     ${test.questions.map((question, questionIndex) => `
-      <section class="test-question" data-question-id="${question.id}">
+      <section class="test-question ${rowToneClass}" data-question-id="${question.id}">
         <div class="question-title">
           <strong>${questionIndex + 1}. ${escapeHtml(question.question_text)}</strong>
-          <span class="muted-note">${escapeHtml(question.points)} puncte</span>
+          <span class="muted-note">${escapeHtml(formatPoints(question.points))} puncte</span>
         </div>
         ${renderQuestionImages(question)}
         <div class="test-answer-grid">
@@ -743,6 +911,7 @@ async function refreshTestLockStatus() {
       localTestLockPending = false;
       setFullscreenLock(false);
       await exitTestFullscreen();
+      setStudentTestMode(false);
       await Promise.all([loadStudentExams({ silent: true }), loadStudentResults({ silent: true })]);
       solveTestMessage.textContent = data.isPlagiarism
         ? "Testul a fost incheiat de profesor si marcat ca plagiat."
@@ -769,6 +938,10 @@ async function refreshTestLockStatus() {
     }
 
     setFullscreenLock(false);
+
+    if (!document.fullscreenElement && activeTest && !fullscreenRequestPending) {
+      await enterTestFullscreen();
+    }
   } catch (error) {
     // Daca verificarea cade, lasam starea curenta neschimbata ca sa nu deblocam gresit testul.
   }
@@ -781,7 +954,13 @@ async function refreshTestLockStatus() {
 Gestioneaza intrarea si revenirea in fullscreen in timpul rezolvarii testului.
 */
 async function enterTestFullscreen() {
+  if (fullscreenRequestPending) {
+    return;
+  }
+
   try {
+    fullscreenRequestPending = true;
+
     if (document.fullscreenElement || !document.documentElement.requestFullscreen) {
       await refreshTestLockStatus();
 
@@ -801,6 +980,8 @@ async function enterTestFullscreen() {
   } catch (error) {
     setFullscreenLock(true);
     logTestEvent("fullscreen_refused", "Browserul nu a permis fullscreen.");
+  } finally {
+    fullscreenRequestPending = false;
   }
 }
 
@@ -849,7 +1030,7 @@ Se cer din API materiile, examenele si rezultatele disponibile pentru studentul 
 function showSubjects() {
   selectedSubject = null;
   selectedSubjectId = null;
-  studentQuickMenuSection.classList.remove("hidden");
+  studentQuickMenuSection.classList.add("hidden");
   studentSubjectMenuSection.classList.add("hidden");
   showStudentMainSection("studentSubjectsSection");
 }
@@ -919,25 +1100,23 @@ async function openTest(examId, rowNumber = null) {
   serverTestLockActive = false;
   localTestLockPending = false;
   setFullscreenLock(false);
+  setStudentTestMode(true, rowNumber);
 
   try {
-    const exam = studentExams.find((item) => String(item.id) === String(examId));
-    const assignedRow = Number(exam?.assigned_row_number);
     const chosenRow = Number(rowNumber);
 
     if (!Number.isInteger(chosenRow)) {
       throw new Error("Alege randul inainte sa pornesti examenul.");
     }
 
-    if (!Number.isInteger(assignedRow) || assignedRow !== chosenRow) {
-      await apiRequest(`/student/exams/${examId}/row`, {
-        method: "POST",
-        body: JSON.stringify({ rowNumber: chosenRow }),
-      });
-    }
+    await apiRequest(`/student/exams/${examId}/row`, {
+      method: "POST",
+      body: JSON.stringify({ rowNumber: chosenRow }),
+    });
 
     const data = await apiRequest(`/student/exams/${examId}/test`);
     activeTest = data;
+    setStudentTestMode(true, data.variant?.row_number || rowNumber);
     renderTestForm(data);
     await enterTestFullscreen();
     if ((data.draftAnswers || []).length) {
@@ -945,6 +1124,7 @@ async function openTest(examId, rowNumber = null) {
       solveTestMessage.className = "message form-message success";
     }
   } catch (error) {
+    setStudentTestMode(false);
     solveTestForm.innerHTML = "";
     solveTestMessage.textContent = error.message;
     solveTestMessage.className = "message form-message error";
@@ -962,6 +1142,22 @@ subjectsList.addEventListener("click", (event) => {
 });
 
 activeExamsList.addEventListener("click", (event) => {
+  const restartButton = event.target.closest("[data-request-restart]");
+
+  if (restartButton) {
+    restartButton.disabled = true;
+    apiRequest(`/student/exams/${restartButton.dataset.requestRestart}/restart-request`, {
+      method: "POST",
+    }).then(() => {
+      restartButton.textContent = "Cerere trimisa";
+    }).catch((error) => {
+      restartButton.disabled = false;
+      solveTestMessage.textContent = error.message;
+      solveTestMessage.className = "message form-message error";
+    });
+    return;
+  }
+
   const button = event.target.closest("[data-start-test]");
 
   if (!button) {
@@ -1013,6 +1209,19 @@ solveTestForm.addEventListener("click", (event) => {
   scheduleAutosave();
 });
 
+solveTestMessage.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-student-subsection]");
+
+  if (!button) {
+    return;
+  }
+
+  setStudentTestMode(false);
+  await exitTestFullscreen();
+  showSubjectSubsection(button.dataset.studentSubsection);
+  studentSubjectMenuSection.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 document.querySelectorAll("[data-student-subsection]").forEach((button) => {
   button.addEventListener("click", () => {
     showSubjectSubsection(button.dataset.studentSubsection);
@@ -1026,6 +1235,7 @@ document.querySelectorAll("[data-student-subsection]").forEach((button) => {
 document.querySelectorAll("[data-student-main-section]").forEach((button) => {
   button.addEventListener("click", async () => {
     if (button.dataset.studentMainSection === "studentHistorySection") {
+      openStudentHistorySubjects.clear();
       await loadStudentResults();
     }
 
@@ -1035,11 +1245,7 @@ document.querySelectorAll("[data-student-main-section]").forEach((button) => {
 });
 
 document.querySelectorAll("[data-close-student-main]").forEach((button) => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".student-main-section").forEach((section) => {
-      section.classList.add("hidden");
-    });
-  });
+  button.addEventListener("click", showStudentQuickMenu);
 });
 
 backToSubjectsButton.addEventListener("click", showSubjects);
@@ -1082,20 +1288,35 @@ solveTestForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ answers, selectedAnswers }),
     });
 
-    solveTestMessage.textContent = `Test trimis. Nota: ${data.result.grade}. Raspunsuri salvate: ${data.result.selected_answers_count || 0}`;
+    solveTestMessage.innerHTML = `
+      <section class="test-finish-screen">
+        <div class="test-finish-score-card">
+          <span>Punctaj obtinut</span>
+          <strong>${formatPoints(data.result.score)} / ${formatPoints(data.result.max_score)}</strong>
+          <small>puncte</small>
+        </div>
+        <div class="test-finish-grade-card">
+          <span>Nota</span>
+          <strong>${formatGrade(data.result.grade)}</strong>
+        </div>
+        <p>Multumim pentru participarea la examen!</p>
+        <button class="primary-button" type="button" data-student-subsection="subjectExamsPanel">Inapoi la examene</button>
+      </section>
+    `;
     solveTestMessage.className = "message form-message success";
+    solveTestForm.innerHTML = "";
     await Promise.all([loadStudentExams({ silent: true }), loadStudentResults({ silent: true })]);
     activeTest = null;
     serverTestLockActive = false;
     localTestLockPending = false;
-    await exitTestFullscreen();
+    setStudentTestMode(true);
     isSubmittingTest = false;
-    showSubjectSubsection("subjectExamsPanel");
-    studentSubjectMenuSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    solveTestPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     solveTestMessage.textContent = error.message;
     solveTestMessage.className = "message form-message error";
     isSubmittingTest = false;
+    setStudentTestMode(Boolean(activeTest), activeTest?.variant?.row_number);
     solveTestForm.querySelectorAll("button, input").forEach((element) => {
       element.disabled = false;
     });

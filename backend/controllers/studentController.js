@@ -126,6 +126,31 @@ async function assignStudentRow(pool, studentId, examId, rowNumber) {
   return createdAssignment.recordset[0];
 }
 
+async function studentCanAccessExam(pool, studentId, examId) {
+  const result = await pool
+    .request()
+    .input("studentId", sql.Int, studentId)
+    .input("examId", sql.Int, examId)
+    .query(`
+      SELECT TOP 1 u.id
+      FROM users u
+      WHERE u.id = @studentId
+        AND (
+          NOT EXISTS (
+            SELECT 1 FROM exam_groups eg WHERE eg.exam_id = @examId
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM exam_groups eg
+            WHERE eg.exam_id = @examId
+              AND LTRIM(RTRIM(eg.group_name)) = LTRIM(RTRIM(ISNULL(u.matriculation_number, '')))
+          )
+        )
+    `);
+
+  return result.recordset.length > 0;
+}
+
 /*
 ----------------------------
        Calculare punctaj
@@ -170,11 +195,14 @@ function calculateExamScore(questions, answersByQuestion, bonusPoints) {
 
   maxScore = Number(maxScore.toFixed(2));
   score = Number(Math.min(score, maxScore).toFixed(2));
+  const grade = maxScore > 0
+    ? Number(Math.min((score / maxScore) * 10, 10).toFixed(2))
+    : 0;
 
   return {
     score,
     maxScore,
-    grade: Number(Math.min(score, 10).toFixed(2)),
+    grade,
     selectedCorrectCount,
     selectedWrongCount,
   };
@@ -357,13 +385,28 @@ async function listStudentExams(req, res) {
                s.info_text AS subject_info, s.rules_text AS subject_rules,
                sea.variant_id AS assigned_variant_id,
                sea.row_number AS assigned_row_number,
-               CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS has_result
+               CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS has_result,
+               CASE WHEN rr.id IS NULL THEN 0 ELSE 1 END AS has_restart_request
         FROM exams e
         INNER JOIN subjects s ON s.id = e.subject_id
         LEFT JOIN student_exam_assignments sea
           ON sea.exam_id = e.id AND sea.student_id = @studentId
         LEFT JOIN results r ON r.exam_id = e.id AND r.student_id = @studentId
+        LEFT JOIN exam_restart_requests rr
+          ON rr.exam_id = e.id AND rr.student_id = @studentId AND rr.status = 'pending'
         WHERE e.status IN ('future', 'active', 'finished', 'archived')
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM exam_groups eg WHERE eg.exam_id = e.id
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM exam_groups eg
+              INNER JOIN users current_student ON current_student.id = @studentId
+              WHERE eg.exam_id = e.id
+                AND LTRIM(RTRIM(eg.group_name)) = LTRIM(RTRIM(ISNULL(current_student.matriculation_number, '')))
+            )
+          )
         ORDER BY
           CASE e.status
             WHEN 'active' THEN 1
@@ -452,6 +495,30 @@ async function chooseStudentExamRow(req, res) {
       });
     }
 
+    if (!(await studentCanAccessExam(pool, req.user.id, examId))) {
+      return res.status(403).json({
+        message: "Examenul nu este asignat grupei tale.",
+      });
+    }
+
+    const attendanceResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .input("studentId", sql.Int, req.user.id)
+      .query(`
+        SELECT COUNT(*) AS present_count
+        FROM exam_attendance
+        WHERE exam_id = @examId
+          AND student_id = @studentId
+          AND is_present = 1
+      `);
+
+    if (Number(attendanceResult.recordset[0]?.present_count || 0) === 0) {
+      return res.status(403).json({
+        message: "Nu esti marcat prezent pentru acest examen.",
+      });
+    }
+
     const existingResult = await pool
       .request()
       .input("studentId", sql.Int, req.user.id)
@@ -471,9 +538,77 @@ async function chooseStudentExamRow(req, res) {
     const existingAssignment = await getStudentAssignment(pool, req.user.id, examId);
 
     if (existingAssignment && Number(existingAssignment.row_number) === rowNumber) {
+      await pool
+        .request()
+        .input("examId", sql.Int, examId)
+        .input("studentId", sql.Int, req.user.id)
+        .query(`
+          UPDATE exam_restart_requests
+          SET status = 'rejected', resolved_at = SYSUTCDATETIME()
+          WHERE exam_id = @examId
+            AND student_id = @studentId
+            AND status = 'pending'
+            AND request_type = 'row_change'
+        `);
+
       return res.json({
         message: "Randul era deja ales.",
         assignment: existingAssignment,
+      });
+    }
+
+    if (existingAssignment && Number(existingAssignment.row_number) !== rowNumber) {
+      const variantCheck = await pool
+        .request()
+        .input("examId", sql.Int, examId)
+        .input("rowNumber", sql.Int, rowNumber)
+        .query(`
+          SELECT TOP 1 id
+          FROM exam_variants
+          WHERE exam_id = @examId AND row_number = @rowNumber
+        `);
+
+      if (variantCheck.recordset.length === 0) {
+        return res.status(404).json({
+          message: "Profesorul nu a setat o varianta pentru randul ales.",
+        });
+      }
+
+      await pool
+        .request()
+        .input("examId", sql.Int, examId)
+        .input("studentId", sql.Int, req.user.id)
+        .input("currentRowNumber", sql.Int, Number(existingAssignment.row_number))
+        .input("requestedRowNumber", sql.Int, rowNumber)
+        .query(`
+          IF NOT EXISTS (
+            SELECT 1
+            FROM exam_restart_requests
+            WHERE exam_id = @examId AND student_id = @studentId AND status = 'pending'
+          )
+          BEGIN
+            INSERT INTO exam_restart_requests (
+              exam_id,
+              student_id,
+              request_type,
+              current_row_number,
+              requested_row_number
+            )
+            VALUES (
+              @examId,
+              @studentId,
+              'row_change',
+              @currentRowNumber,
+              @requestedRowNumber
+            )
+          END
+        `);
+
+      return res.status(409).json({
+        message: `Ai ales initial randul ${existingAssignment.row_number}. Pentru randul ${rowNumber} este nevoie de aprobarea profesorului.`,
+        requiresApproval: true,
+        currentRowNumber: Number(existingAssignment.row_number),
+        requestedRowNumber: rowNumber,
       });
     }
 
@@ -545,6 +680,31 @@ async function getStudentTest(req, res) {
     if (exam.status !== "active") {
       return res.status(403).json({
         message: "Examenul nu este activ.",
+      });
+    }
+
+    if (!(await studentCanAccessExam(pool, req.user.id, examId))) {
+      return res.status(403).json({
+        message: "Examenul nu este asignat grupei tale.",
+      });
+    }
+
+    const attendanceResult = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .input("studentId", sql.Int, req.user.id)
+      .query(`
+        SELECT
+          COUNT(*) AS marked_count,
+          SUM(CASE WHEN student_id = @studentId AND is_present = 1 THEN 1 ELSE 0 END) AS present_count
+        FROM exam_attendance
+        WHERE exam_id = @examId
+      `);
+    const attendance = attendanceResult.recordset[0] || {};
+
+    if (Number(attendance.present_count || 0) === 0) {
+      return res.status(403).json({
+        message: "Nu esti marcat prezent pentru acest examen. Cere profesorului sa verifice prezenta.",
       });
     }
 
@@ -639,6 +799,57 @@ async function getStudentTest(req, res) {
   } catch (error) {
     res.status(500).json({
       message: "Eroare la incarcarea testului.",
+      error: error.message,
+    });
+  }
+}
+
+async function requestExamRestart(req, res) {
+  try {
+    const examId = Number(req.params.examId);
+
+    if (!Number.isInteger(examId)) {
+      return res.status(400).json({ message: "ID examen invalid." });
+    }
+
+    const pool = await getPool();
+    const check = await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .input("studentId", sql.Int, req.user.id)
+      .query(`
+        SELECT TOP 1 e.status,
+          CASE WHEN r.id IS NULL THEN 0 ELSE 1 END AS has_result
+        FROM exams e
+        LEFT JOIN results r ON r.exam_id = e.id AND r.student_id = @studentId
+        WHERE e.id = @examId
+      `);
+
+    if (!check.recordset.length || check.recordset[0].status !== "active" || !check.recordset[0].has_result) {
+      return res.status(400).json({
+        message: "Reluarea poate fi ceruta doar pentru un examen activ deja trimis.",
+      });
+    }
+
+    await pool
+      .request()
+      .input("examId", sql.Int, examId)
+      .input("studentId", sql.Int, req.user.id)
+      .query(`
+        IF NOT EXISTS (
+          SELECT 1 FROM exam_restart_requests
+          WHERE exam_id = @examId AND student_id = @studentId AND status = 'pending'
+        )
+        BEGIN
+          INSERT INTO exam_restart_requests (exam_id, student_id)
+          VALUES (@examId, @studentId)
+        END
+      `);
+
+    res.json({ message: "Cererea de reluare a fost trimisa profesorului." });
+  } catch (error) {
+    res.status(500).json({
+      message: "Eroare la trimiterea cererii de reluare.",
       error: error.message,
     });
   }
@@ -1207,5 +1418,6 @@ module.exports = {
   listStudentExams,
   listStudentResults,
   recordStudentTestEvent,
+  requestExamRestart,
   submitStudentTest,
 };

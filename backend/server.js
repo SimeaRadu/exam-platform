@@ -49,6 +49,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(express.static(path.join(__dirname, "..", "frontend")));
 
 /*
 ----------------------------
@@ -57,9 +58,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 */
 // Ofera endpoint-uri simple pentru verificarea API-ului si a conexiunii la SQL Server.
 app.get("/", (req, res) => {
-  res.json({
-    message: "Exam Platform API is running",
-  });
+  res.sendFile(path.join(__dirname, "..", "frontend", "login.html"));
 });
 
 app.get("/api/health", async (req, res) => {

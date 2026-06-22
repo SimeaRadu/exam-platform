@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Profesor | Exam Platform</title>
-  <link rel="stylesheet" href="css/style.css?v=20260605-6">
+  <link rel="stylesheet" href="css/style.css?v=20260622-local-17">
 </head>
-<body>
+<body class="admin-dashboard">
   <!--
   ----------------------------
               Header profesor
@@ -15,10 +15,17 @@
   -->
   <header class="topbar">
     <div>
-      <h1>Dashboard profesor</h1>
-      <p id="professorName">Meniu principal</p>
+      <h1 id="dashboardTitle">Dashboard profesor</h1>
+      <p id="professorName">Profesor</p>
     </div>
-    <button id="logoutButton" class="ghost-button" type="button">Logout</button>
+    <div class="topbar-actions">
+      <select id="dashboardThemeSelect" class="theme-select" aria-label="Tema dashboard">
+        <option value="blue">Albastru</option>
+        <option value="beige">Bej</option>
+        <option value="dark-yellow">Negru-galben</option>
+      </select>
+      <button id="logoutButton" class="ghost-button" type="button">Logout</button>
+    </div>
   </header>
 
   <main class="dashboard-layout">
@@ -29,46 +36,30 @@
     Meniul principal deschide modulele disponibile in functie de rol si permisiuni.
     -->
     <section id="adminMenuSection" class="panel">
-      <div class="section-heading">
-        <h2>Meniu admin</h2>
-        <p>Alege ce vrei sa administrezi.</p>
-      </div>
-
       <div class="admin-menu-grid">
         <button class="admin-menu-card" type="button" data-open-section="usersSection">
           <span class="menu-card-icon" data-menu-icon="users" aria-hidden="true"></span>
           <strong>Utilizatori</strong>
-          <span>Adauga studenti, profesori si sterge conturi gresite.</span>
         </button>
 
-        <button class="admin-menu-card" type="button" data-open-section="subjectsSection" data-admin-only-menu>
+        <button class="admin-menu-card" type="button" data-open-section="subjectsSection">
           <span class="menu-card-icon" data-menu-icon="book" aria-hidden="true"></span>
           <strong>Materii</strong>
-          <span>Creeaza materii si asigneaza profesorii responsabili.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="examsSection">
           <span class="menu-card-icon" data-menu-icon="clipboard" aria-hidden="true"></span>
           <strong>Examene</strong>
-          <span>Creeaza examene, vezi examene viitoare si porneste testele.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="archiveSection">
           <span class="menu-card-icon" data-menu-icon="archive" aria-hidden="true"></span>
           <strong>Arhiva</strong>
-          <span>Vezi examenele arhivate, grupate pe materii.</span>
-        </button>
-
-        <button class="admin-menu-card" type="button" data-open-section="subjectInfoSection">
-          <span class="menu-card-icon" data-menu-icon="megaphone" aria-hidden="true"></span>
-          <strong>Informatii materie</strong>
-          <span>Publica mesaje si anunturi vizibile studentilor.</span>
         </button>
 
         <button class="admin-menu-card" type="button" data-open-section="resultsSection">
           <span class="menu-card-icon" data-menu-icon="chart" aria-hidden="true"></span>
           <strong>Rezultate</strong>
-          <span>Consulta notele si raspunsurile studentilor.</span>
         </button>
       </div>
     </section>
@@ -91,7 +82,7 @@
       </div>
 
       <section class="panel">
-      <div id="createUserPanel">
+      <div id="createUserPanel" data-collapsible-panel>
       <div class="section-heading">
         <h2>Adauga utilizator</h2>
         <p>Studentii vor intra cu numele complet si codul unic.</p>
@@ -163,7 +154,7 @@
       </div>
       </section>
 
-      <section id="importUsersPanel" class="panel">
+      <section id="importUsersPanel" class="panel" data-collapsible-panel>
         <div class="section-heading">
           <h2>Import studenti din Excel</h2>
           <p>Incarca un fisier .xlsx cu nume student, grupa si cod. Codul devine parola studentului.</p>
@@ -180,33 +171,17 @@
         </form>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-collapsible-panel>
       <div class="section-heading horizontal">
         <div>
-          <h2>Utilizatori</h2>
-          <p>Lista conturilor introduse in baza de date.</p>
+          <h2>Studenti din grupe</h2>
+          <p>Extinde o grupa pentru a vedea studentii. Profesorii si adminii apar separat.</p>
         </div>
         <button id="refreshUsersButton" class="secondary-button" type="button">Refresh</button>
       </div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Nume</th>
-              <th>Rol</th>
-              <th>Email</th>
-              <th>Grupa</th>
-              <th data-account-manager-column>Cod unic</th>
-              <th data-account-manager-column>Actiuni</th>
-            </tr>
-          </thead>
-          <tbody id="usersTableBody">
-            <tr>
-              <td colspan="6">Se incarca...</td>
-            </tr>
-          </tbody>
-        </table>
+      <div id="usersTableBody" class="user-groups-list collapse-list">
+        <p class="muted-note">Se incarca...</p>
       </div>
       </section>
     </section>
@@ -229,7 +204,7 @@
       </div>
 
       <section class="panel">
-        <div id="subjectAdminPanel">
+        <div id="subjectAdminPanel" data-collapsible-panel>
         <div class="section-heading">
           <h2>Adauga materie</h2>
           <p>Doar adminul principal poate crea sau sterge materii.</p>
@@ -259,7 +234,7 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-collapsible-panel>
         <div class="section-heading">
           <h2>Lista materii</h2>
           <p>Materiile disponibile pentru examene si profesorul asignat.</p>
@@ -267,7 +242,7 @@
         <div id="subjectsList" class="subject-list"></div>
       </section>
 
-      <section id="subjectAssignmentPanel" class="panel">
+      <section id="subjectAssignmentPanel" class="panel" data-collapsible-panel>
         <div class="section-heading">
           <h2>Asignare materii</h2>
           <p>Alege materia si profesorul care o administreaza.</p>
@@ -355,7 +330,7 @@
         </div>
       </div>
 
-      <section class="panel">
+      <section class="panel" data-collapsible-panel>
         <div class="section-heading">
           <h2>Creeaza examen</h2>
           <p>Examenele noi pornesc cu status viitor.</p>
@@ -383,12 +358,56 @@
             <input id="bonusPoints" name="bonusPoints" type="number" min="0" step="0.25" value="0" required>
           </div>
 
+          <div class="form-wide assignment-create-grid">
+            <div class="assignment-choice-column">
+              <div class="assignment-choice-heading">
+                <label>Grupe participante</label>
+                <span>Alege una sau mai multe grupe</span>
+              </div>
+              <div id="examGroupsList" class="checkbox-panel">
+                <p class="muted-note">Se incarca grupele...</p>
+              </div>
+            </div>
+
+            <div class="selected-panel" aria-live="polite">
+              <div class="selected-panel-heading">
+                <strong>Grupe selectate</strong>
+                <span id="selectedExamGroupsCount" class="selection-count">0</span>
+              </div>
+              <div id="selectedExamGroupsPanel" class="selected-chip-list">
+                <span class="muted-note">Nicio grupa selectata.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-wide assignment-create-grid">
+            <div class="assignment-choice-column">
+              <div class="assignment-choice-heading">
+                <label>Profesori responsabili</label>
+                <span>Alege profesorii care pot administra examenul</span>
+              </div>
+              <div id="examOwnersList" class="checkbox-panel compact-checkbox-panel">
+                <p class="muted-note">Se incarca profesorii...</p>
+              </div>
+            </div>
+
+            <div class="selected-panel" aria-live="polite">
+              <div class="selected-panel-heading">
+                <strong>Profesori selectati</strong>
+                <span id="selectedExamOwnersCount" class="selection-count">0</span>
+              </div>
+              <div id="selectedExamOwnersPanel" class="selected-chip-list">
+                <span class="muted-note">Niciun profesor selectat.</span>
+              </div>
+            </div>
+          </div>
+
           <button class="primary-button form-action" type="submit">Salveaza examen</button>
           <p id="createExamMessage" class="message form-message" aria-live="polite"></p>
         </form>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-collapsible-panel>
         <div class="section-heading horizontal">
           <div>
             <h2>Lista examene</h2>
@@ -433,10 +452,6 @@
           <button id="closeAssignmentsPanelButton" class="secondary-button" type="button">Inchide</button>
         </div>
 
-        <div class="action-row assignment-toolbar">
-          <button id="randomAssignmentsButton" class="secondary-button" type="button">Asignare random</button>
-        </div>
-
         <div class="table-wrap">
           <table>
             <thead>
@@ -455,6 +470,81 @@
           </table>
         </div>
         <p id="assignmentsMessage" class="message form-message" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <section id="examRoomSection" class="hidden dashboard-section">
+      <section class="panel exam-room-hero">
+        <div>
+          <span class="muted-note">Examen curent</span>
+          <h2 id="examRoomTitle" class="exam-room-title">Examen</h2>
+          <p id="examRoomMeta"></p>
+        </div>
+        <div class="exam-room-controls">
+          <strong id="examRoomPresentCount" class="stat-pill">0 prezenti</strong>
+          <button id="examRoomStartButton" class="primary-button" type="button">Start examen</button>
+          <button id="examRoomStopButton" class="danger-button" type="button">Stop examen</button>
+          <button id="examRoomDownloadButton" class="secondary-button" type="button">Descarca prezenta</button>
+          <button id="closeExamRoomButton" class="secondary-button" type="button">Inapoi la examene</button>
+        </div>
+      </section>
+
+      <section class="panel exam-room-layout">
+        <aside>
+          <h3>Grupe</h3>
+          <div id="examRoomGroups" class="exam-room-groups"></div>
+        </aside>
+        <div>
+          <div class="section-heading horizontal">
+            <h2 id="examRoomGroupTitle">Studenti</h2>
+            <div id="examRoomStats" class="exam-room-stats"></div>
+          </div>
+          <div id="examRoomStudents" class="exam-room-students"></div>
+        </div>
+      </section>
+      <p id="examRoomMessage" class="message form-message" aria-live="polite"></p>
+    </section>
+
+    <!--
+    ----------------------------
+              Prezenta
+    ----------------------------
+    Profesorul marcheaza rapid studentii prezenti pe grupe, pentru examenul ales.
+    -->
+    <section id="attendanceSection" class="hidden dashboard-section">
+      <div class="panel">
+        <div class="section-heading horizontal">
+          <div>
+            <h2>Prezenta</h2>
+            <p>Alege examenul si marcheaza studentii prezenti in sala.</p>
+          </div>
+          <button class="secondary-button" type="button" data-back-menu>Inapoi la meniu</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="form-grid compact-form">
+          <div>
+            <label for="attendanceExam">Examen</label>
+            <select id="attendanceExam">
+              <option value="">Alege examenul</option>
+            </select>
+          </div>
+          <button id="refreshAttendanceButton" class="secondary-button form-action" type="button">Refresh</button>
+          <button id="downloadAttendanceButton" class="secondary-button form-action" type="button">Descarca prezenta</button>
+        </div>
+        <p id="attendanceMessage" class="message form-message" aria-live="polite"></p>
+      </section>
+
+      <section id="attendancePanel" class="panel hidden">
+        <div class="section-heading horizontal">
+          <div>
+            <h2 id="attendanceTitle">Examen</h2>
+            <p id="attendanceMeta">Studenti grupati pe grupe.</p>
+          </div>
+          <strong id="attendanceCounter" class="stat-pill">0 prezenti</strong>
+        </div>
+        <div id="attendanceGroups" class="collapse-list"></div>
       </section>
     </section>
 
@@ -732,25 +822,8 @@ CORECT: 1</pre>
           </div>
         </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Materie</th>
-                <th>Examen</th>
-                <th>Punctaj</th>
-                <th>Nota</th>
-                <th>Trimis la</th>
-                <th>Actiuni</th>
-              </tr>
-            </thead>
-            <tbody id="resultsTableBody">
-              <tr>
-                <td colspan="7">Se incarca...</td>
-              </tr>
-            </tbody>
-          </table>
+        <div id="resultsTableBody" class="result-groups-list collapse-list">
+          <p class="muted-note">Se incarca...</p>
         </div>
       </section>
 
@@ -772,6 +845,6 @@ CORECT: 1</pre>
 
   <!-- Scripturile pentru API si dashboard profesor/admin. -->
   <script src="js/api.js?v=20260512-3"></script>
-  <script src="js/admin-dashboard.js?v=20260609-3"></script>
+  <script src="js/admin-dashboard.js?v=20260622-local-22"></script>
 </body>
 </html>

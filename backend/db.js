@@ -344,6 +344,38 @@ async function ensureSchema() {
     `);
 
     await pool.request().query(`
+      IF OBJECT_ID('exam_groups', 'U') IS NULL
+      BEGIN
+        CREATE TABLE exam_groups (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          exam_id INT NOT NULL,
+          group_name NVARCHAR(50) NOT NULL,
+          created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT FK_exam_groups_exam
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+          CONSTRAINT UQ_exam_groups_exam_group UNIQUE (exam_id, group_name)
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('exam_owners', 'U') IS NULL
+      BEGIN
+        CREATE TABLE exam_owners (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          exam_id INT NOT NULL,
+          professor_id INT NOT NULL,
+          created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT FK_exam_owners_exam
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+          CONSTRAINT FK_exam_owners_professor
+            FOREIGN KEY (professor_id) REFERENCES users(id),
+          CONSTRAINT UQ_exam_owners_exam_professor UNIQUE (exam_id, professor_id)
+        )
+      END
+    `);
+
+    await pool.request().query(`
       IF OBJECT_ID('student_answers', 'U') IS NULL
       BEGIN
         CREATE TABLE student_answers (
@@ -384,6 +416,12 @@ async function ensureSchema() {
           CONSTRAINT UQ_results_student_exam UNIQUE (student_id, exam_id)
         )
       END
+    `);
+
+    await pool.request().query(`
+      UPDATE results
+      SET grade = CAST(ROUND((score / NULLIF(max_score, 0)) * 10, 2) AS DECIMAL(4,2))
+      WHERE max_score > 0
     `);
 
     await pool.request().query(`
@@ -488,6 +526,120 @@ async function ensureSchema() {
           CONSTRAINT FK_test_locks_released_by
             FOREIGN KEY (released_by) REFERENCES users(id)
         )
+      END
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('exam_attendance', 'U') IS NULL
+      BEGIN
+        CREATE TABLE exam_attendance (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          exam_id INT NOT NULL,
+          student_id INT NOT NULL,
+          professor_id INT NOT NULL,
+          is_present BIT NOT NULL DEFAULT 0,
+          marked_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT FK_exam_attendance_exam
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+          CONSTRAINT FK_exam_attendance_student
+            FOREIGN KEY (student_id) REFERENCES users(id),
+          CONSTRAINT FK_exam_attendance_professor
+            FOREIGN KEY (professor_id) REFERENCES users(id),
+          CONSTRAINT UQ_exam_attendance_exam_student_professor UNIQUE (exam_id, student_id, professor_id)
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('exam_attendance', 'U') IS NOT NULL
+      BEGIN
+        ;WITH duplicate_attendance AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY exam_id, student_id
+                   ORDER BY marked_at DESC, id DESC
+                 ) AS row_index
+          FROM exam_attendance
+        )
+        DELETE FROM duplicate_attendance
+        WHERE row_index > 1;
+
+        IF EXISTS (
+          SELECT 1
+          FROM sys.key_constraints
+          WHERE name = 'UQ_exam_attendance_exam_student_professor'
+            AND parent_object_id = OBJECT_ID('exam_attendance')
+        )
+        BEGIN
+          ALTER TABLE exam_attendance DROP CONSTRAINT UQ_exam_attendance_exam_student_professor;
+        END
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM sys.indexes
+          WHERE name = 'UQ_exam_attendance_exam_student'
+            AND object_id = OBJECT_ID('exam_attendance')
+        )
+        BEGIN
+          CREATE UNIQUE INDEX UQ_exam_attendance_exam_student
+          ON exam_attendance (exam_id, student_id);
+        END
+      END
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('exam_restart_requests', 'U') IS NULL
+      BEGIN
+        CREATE TABLE exam_restart_requests (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          exam_id INT NOT NULL,
+          student_id INT NOT NULL,
+          request_type NVARCHAR(30) NOT NULL DEFAULT 'restart',
+          current_row_number INT NULL,
+          requested_row_number INT NULL,
+          status NVARCHAR(20) NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'approved', 'rejected')),
+          requested_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          resolved_at DATETIME2 NULL,
+          resolved_by INT NULL,
+          CONSTRAINT FK_restart_requests_exam
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+          CONSTRAINT FK_restart_requests_student
+            FOREIGN KEY (student_id) REFERENCES users(id),
+          CONSTRAINT FK_restart_requests_resolver
+            FOREIGN KEY (resolved_by) REFERENCES users(id)
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF COL_LENGTH('exam_restart_requests', 'request_type') IS NULL
+      BEGIN
+        ALTER TABLE exam_restart_requests ADD request_type NVARCHAR(30) NOT NULL
+          CONSTRAINT DF_restart_requests_type DEFAULT 'restart'
+      END
+
+      IF COL_LENGTH('exam_restart_requests', 'current_row_number') IS NULL
+      BEGIN
+        ALTER TABLE exam_restart_requests ADD current_row_number INT NULL
+      END
+
+      IF COL_LENGTH('exam_restart_requests', 'requested_row_number') IS NULL
+      BEGIN
+        ALTER TABLE exam_restart_requests ADD requested_row_number INT NULL
+      END
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = 'UX_restart_requests_pending'
+          AND object_id = OBJECT_ID('exam_restart_requests')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX UX_restart_requests_pending
+        ON exam_restart_requests(exam_id, student_id)
+        WHERE status = 'pending'
       END
     `);
 

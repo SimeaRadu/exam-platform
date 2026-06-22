@@ -14,6 +14,7 @@ const {
   listStudentExams,
   listStudentResults,
   recordStudentTestEvent,
+  requestExamRestart,
   submitStudentTest,
 } = require("../controllers/studentController");
 const {
@@ -40,6 +41,7 @@ router.get("/exams/:examId/test", getStudentTest);
 router.get("/exams/:examId/lock-status", getStudentTestLockStatus);
 router.post("/exams/:examId/autosave", autosaveStudentTest);
 router.post("/exams/:examId/events", recordStudentTestEvent);
+router.post("/exams/:examId/restart-request", requestExamRestart);
 router.post("/exams/:examId/submit", submitStudentTest);
 
 module.exports = router;
