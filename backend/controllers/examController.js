@@ -55,6 +55,8 @@ function normalizeQuestionImages(questionData) {
     .map((image) => ({
       imagePath: image.imagePath || image.image_path || null,
       imageOriginalName: image.imageOriginalName || image.image_original_name || null,
+      imageData: image.imageData || image.image_data || null,
+      mimeType: image.mimeType || image.mime_type || null,
     }))
     .filter((image) => image.imagePath);
 
@@ -83,7 +85,8 @@ async function attachQuestionImages(pool, questions) {
     .request()
     .input("ids", sql.NVarChar(sql.MAX), ids.join(","))
     .query(`
-      SELECT qi.id, qi.question_id, qi.image_path, qi.image_original_name, qi.sort_order
+      SELECT qi.id, qi.question_id, qi.image_path, qi.image_original_name, qi.sort_order,
+             CASE WHEN qi.image_data IS NULL THEN 0 ELSE 1 END AS has_image_data
       FROM question_images qi
       INNER JOIN STRING_SPLIT(@ids, ',') ids ON TRY_CAST(ids.value AS INT) = qi.question_id
       ORDER BY qi.question_id, qi.sort_order, qi.id
@@ -99,7 +102,9 @@ async function attachQuestionImages(pool, questions) {
 
     imagesByQuestion.get(key).push({
       id: image.id,
-      image_path: image.image_path,
+      image_path: image.has_image_data
+        ? `/api/files/question-images/${image.id}`
+        : image.image_path,
       image_original_name: image.image_original_name,
       sort_order: image.sort_order,
     });
@@ -394,6 +399,7 @@ function getRtfImagePayload(group) {
       return {
         buffer: Buffer.from(hex, "hex"),
         extension: signature.extension,
+        mimeType: getImageMimeType(signature.extension),
       };
     }
   }
@@ -407,13 +413,16 @@ function getRtfImagePayload(group) {
   if (/\\dibitmap\b/i.test(group)) {
     const bmpBuffer = convertDibToBmp(Buffer.from(hexRun, "hex"));
 
-    return bmpBuffer ? { buffer: bmpBuffer, extension: "bmp" } : null;
+    return bmpBuffer
+      ? { buffer: bmpBuffer, extension: "bmp", mimeType: "image/bmp" }
+      : null;
   }
 
   if (/\\emfblip\b/i.test(group)) {
     return {
       buffer: Buffer.from(hexRun, "hex"),
       extension: "emf",
+      mimeType: "image/emf",
     };
   }
 
@@ -421,6 +430,7 @@ function getRtfImagePayload(group) {
     return {
       buffer: Buffer.from(hexRun, "hex"),
       extension: "wmf",
+      mimeType: "image/wmf",
     };
   }
 
@@ -428,6 +438,7 @@ function getRtfImagePayload(group) {
     return {
       buffer: Buffer.from(hexRun, "hex"),
       extension: "jpg",
+      mimeType: "image/jpeg",
     };
   }
 
@@ -435,10 +446,28 @@ function getRtfImagePayload(group) {
     return {
       buffer: Buffer.from(hexRun, "hex"),
       extension: "png",
+      mimeType: "image/png",
     };
   }
 
   return null;
+}
+
+function getImageMimeType(extension) {
+  const mimeTypes = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+    tif: "image/tiff",
+    tiff: "image/tiff",
+    emf: "image/emf",
+    wmf: "image/wmf",
+  };
+
+  return mimeTypes[String(extension || "").toLowerCase()] || "application/octet-stream";
 }
 
 /*
@@ -501,6 +530,8 @@ async function extractRtfQuestionImages(buffer, examId) {
         questionNumber,
         imagePath: `/uploads/questions/${fileName}`,
         imageOriginalName: fileName,
+        imageData: imagePayload.buffer,
+        mimeType: imagePayload.mimeType,
       });
       imageIndex += 1;
     }
@@ -855,10 +886,26 @@ async function insertQuestion(transaction, variantId, questionData) {
       .input("questionId", sql.Int, questionId)
       .input("imagePath", sql.NVarChar(2048), image.imagePath)
       .input("imageOriginalName", sql.NVarChar(255), image.imageOriginalName || null)
+      .input("imageData", sql.VarBinary(sql.MAX), image.imageData || null)
+      .input("mimeType", sql.NVarChar(100), image.mimeType || null)
       .input("sortOrder", sql.Int, index + 1)
       .query(`
-        INSERT INTO question_images (question_id, image_path, image_original_name, sort_order)
-        VALUES (@questionId, @imagePath, @imageOriginalName, @sortOrder)
+        INSERT INTO question_images (
+          question_id,
+          image_path,
+          image_original_name,
+          image_data,
+          mime_type,
+          sort_order
+        )
+        VALUES (
+          @questionId,
+          @imagePath,
+          @imageOriginalName,
+          @imageData,
+          @mimeType,
+          @sortOrder
+        )
       `);
   }
 
@@ -2100,6 +2147,12 @@ async function createQuestion(req, res) {
         correctAnswerIndexes,
         imagePath,
         imageOriginalName,
+        images: image ? [{
+          imagePath,
+          imageOriginalName,
+          imageData: image.data,
+          mimeType: image.mimeType,
+        }] : [],
       });
 
       await transaction.commit();
@@ -2370,7 +2423,7 @@ async function releaseTestLock(req, res) {
       .request()
       .input("lockId", sql.Int, lockId)
       .query(`
-        SELECT TOP 1 id, student_id, exam_id
+        SELECT TOP 1 id, exam_id
         FROM student_test_locks
         WHERE id = @lockId AND is_active = 1
       `);
@@ -2382,7 +2435,6 @@ async function releaseTestLock(req, res) {
     }
 
     const examId = Number(lockResult.recordset[0].exam_id);
-    const studentId = Number(lockResult.recordset[0].student_id);
 
     if (!(await canManageExam(pool, req, examId))) {
       return res.status(403).json({
@@ -2390,36 +2442,17 @@ async function releaseTestLock(req, res) {
       });
     }
 
-    const transaction = new sql.Transaction(pool);
-    await transaction.begin();
-
-    try {
-      await new sql.Request(transaction)
-        .input("studentId", sql.Int, studentId)
-        .input("examId", sql.Int, examId)
-        .query(`
-          UPDATE student_answer_drafts
-          SET is_locked = 1
-          WHERE student_id = @studentId
-            AND exam_id = @examId
-        `);
-
-      await new sql.Request(transaction)
-        .input("lockId", sql.Int, lockId)
-        .input("releasedBy", sql.Int, req.user.id)
-        .query(`
-          UPDATE student_test_locks
-          SET is_active = 0,
-              released_at = SYSUTCDATETIME(),
-              released_by = @releasedBy
-          WHERE id = @lockId
-        `);
-
-      await transaction.commit();
-    } catch (error) {
-      await transaction.rollback();
-      throw error;
-    }
+    await pool
+      .request()
+      .input("lockId", sql.Int, lockId)
+      .input("releasedBy", sql.Int, req.user.id)
+      .query(`
+        UPDATE student_test_locks
+        SET is_active = 0,
+            released_at = SYSUTCDATETIME(),
+            released_by = @releasedBy
+        WHERE id = @lockId
+      `);
 
     res.json({
       message: "Studentul poate continua testul.",
@@ -2876,14 +2909,8 @@ async function approveExamRestart(req, res) {
             DELETE FROM student_answer_drafts
             WHERE exam_id = @examId AND student_id = @studentId;
 
-            INSERT INTO student_answer_drafts (
-              student_id,
-              exam_id,
-              question_id,
-              answer_id,
-              is_locked
-            )
-            SELECT DISTINCT student_id, exam_id, question_id, answer_id, 1
+            INSERT INTO student_answer_drafts (student_id, exam_id, question_id, answer_id)
+            SELECT DISTINCT student_id, exam_id, question_id, answer_id
             FROM student_answers
             WHERE exam_id = @examId
               AND student_id = @studentId
@@ -3306,6 +3333,8 @@ async function importRtf(req, res) {
           question.images.push({
             imagePath: image.imagePath,
             imageOriginalName: image.imageOriginalName,
+            imageData: image.imageData,
+            mimeType: image.mimeType,
           });
         }
       });

@@ -21,6 +21,8 @@ async function saveQuestionImage(file) {
   return {
     path: `/uploads/questions/${safeName}`,
     originalName: file.originalname,
+    data: file.buffer,
+    mimeType: file.mimetype || "application/octet-stream",
   };
 }
 

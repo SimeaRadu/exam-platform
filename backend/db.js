@@ -314,11 +314,25 @@ async function ensureSchema() {
           question_id INT NOT NULL,
           image_path NVARCHAR(2048) NOT NULL,
           image_original_name NVARCHAR(255) NULL,
+          image_data VARBINARY(MAX) NULL,
+          mime_type NVARCHAR(100) NULL,
           sort_order INT NOT NULL DEFAULT 1,
           created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
           CONSTRAINT FK_question_images_question
             FOREIGN KEY (question_id) REFERENCES questions(id)
         )
+      END
+    `);
+
+    await pool.request().query(`
+      IF COL_LENGTH('question_images', 'image_data') IS NULL
+      BEGIN
+        ALTER TABLE question_images ADD image_data VARBINARY(MAX) NULL
+      END
+
+      IF COL_LENGTH('question_images', 'mime_type') IS NULL
+      BEGIN
+        ALTER TABLE question_images ADD mime_type NVARCHAR(100) NULL
       END
     `);
 
@@ -463,7 +477,6 @@ async function ensureSchema() {
           exam_id INT NOT NULL,
           question_id INT NOT NULL,
           answer_id INT NOT NULL,
-          is_locked BIT NOT NULL DEFAULT 0,
           saved_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
           CONSTRAINT FK_answer_drafts_student
             FOREIGN KEY (student_id) REFERENCES users(id),
@@ -474,15 +487,6 @@ async function ensureSchema() {
           CONSTRAINT FK_answer_drafts_answer
             FOREIGN KEY (answer_id) REFERENCES answers(id)
         )
-      END
-    `);
-
-    await pool.request().query(`
-      IF COL_LENGTH('student_answer_drafts', 'is_locked') IS NULL
-      BEGIN
-        ALTER TABLE student_answer_drafts
-        ADD is_locked BIT NOT NULL
-          CONSTRAINT DF_student_answer_drafts_is_locked DEFAULT 0
       END
     `);
 

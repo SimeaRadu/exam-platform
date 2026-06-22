@@ -9,11 +9,12 @@ const cors = require("cors");
 const path = require("path");
 require("dotenv").config();
 
-const { ensureSchema, getPool } = require("./db");
+const { ensureSchema, getPool, sql } = require("./db");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const examRoutes = require("./routes/examRoutes");
 const studentRoutes = require("./routes/studentRoutes");
+const { backfillQuestionImages } = require("./scripts/backfillQuestionImages");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -27,7 +28,14 @@ let schemaReady;
 // Ruleaza pregatirea bazei o singura data, inainte ca API-ul sa proceseze cereri reale.
 function getSchemaReady() {
   if (!schemaReady) {
-    schemaReady = ensureSchema();
+    schemaReady = ensureSchema().then(async () => {
+      const pool = await getPool();
+      const summary = await backfillQuestionImages(pool);
+
+      if (summary.updated > 0 || summary.missing > 0) {
+        console.log("Question image storage sync:", summary);
+      }
+    });
   }
 
   return schemaReady;
@@ -73,6 +81,42 @@ app.get("/api/health", async (req, res) => {
       status: "error",
       database: "not connected",
       message: error.message,
+    });
+  }
+});
+
+app.get("/api/files/question-images/:imageId", async (req, res) => {
+  try {
+    await getSchemaReady();
+    const imageId = Number(req.params.imageId);
+
+    if (!Number.isInteger(imageId)) {
+      return res.status(400).json({ message: "ID imagine invalid." });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("imageId", sql.Int, imageId)
+      .query(`
+        SELECT TOP 1 image_data, mime_type, image_original_name
+        FROM question_images
+        WHERE id = @imageId
+      `);
+    const image = result.recordset[0];
+
+    if (!image?.image_data) {
+      return res.status(404).json({ message: "Imaginea nu a fost gasita." });
+    }
+
+    res.setHeader("Content-Type", image.mime_type || "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(image.image_original_name || `question-${imageId}`)}"`);
+    return res.send(image.image_data);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Imaginea nu a putut fi incarcata.",
+      error: error.message,
     });
   }
 });

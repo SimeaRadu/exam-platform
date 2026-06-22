@@ -2004,42 +2004,6 @@ button.check-card {
   gap: 12px;
 }
 
-.question-meta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.resume-locked-label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  padding: 4px 9px;
-  border: 1px solid rgba(255, 216, 61, 0.65);
-  border-radius: 999px;
-  background: rgba(255, 216, 61, 0.14);
-  color: #ffe36c;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.test-question.is-resume-locked {
-  box-shadow:
-    inset 4px 0 0 rgba(255, 216, 61, 0.92),
-    inset 0 0 0 1px rgba(255, 216, 61, 0.18);
-}
-
-.test-question.is-resume-locked .answer-option:disabled {
-  opacity: 1;
-  cursor: not-allowed;
-}
-
-.test-question.is-resume-locked .answer-option:not(.is-selected) {
-  filter: saturate(0.72);
-}
-
 .test-answer-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "create-professor": "node scripts/createProfessor.js"
+    "create-professor": "node scripts/createProfessor.js",
+    "backfill-question-images": "node scripts/backfillQuestionImages.js"
   },
   "keywords": [],
   "author": "",
